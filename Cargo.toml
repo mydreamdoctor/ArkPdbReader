@@ -1,0 +1,44 @@
+[package]
+name = "ark-pdb-reader"
+version = "0.1.0"
+edition = "2021"
+description = "High-performance PDB reader for ARK: Survival Ascended dedicated server PDB files. Extracts class/struct names, data members, and member functions via a C-compatible FFI."
+license = "MIT"
+
+[lib]
+name = "ark_pdb_reader"
+# cdylib  = shared library (.so) for runtime linking from C++
+# staticlib = archive (.a) for static linking
+crate-type = ["cdylib", "staticlib"]
+
+[dependencies]
+# Official Microsoft PDB reading library. Provides direct access to all PDB
+# streams at the CodeView record level - the key advantage over LLVM's
+# high-level API which fails to extract members/functions for large game PDBs.
+ms-pdb = { git = "https://github.com/microsoft/pdb-rs", package = "ms-pdb" }
+
+# Error handling
+anyhow = "1"
+
+# bstr is re-exported by ms-pdb/ms-codeview but we use it directly for
+# converting BStr (byte strings in PDB) to &str / String.
+bstr = "1"
+
+[profile.release]
+# Maximum optimisation - this runs against a very large PDB (multi-GB).
+opt-level = 3
+# Link-time optimisation: inlines across crate boundaries, eliminates dead code.
+lto = "fat"
+# Single codegen unit required for full LTO.
+codegen-units = 1
+# Strip debug symbols from the release binary to reduce .so size.
+strip = "symbols"
+# Abort on panic instead of unwinding - smaller binary, no unwinding overhead.
+# NOTE: the FFI boundary uses catch_unwind before this kicks in, so panics
+#       are always surfaced as errors rather than process termination.
+panic = "abort"
+
+[profile.dev]
+# Faster incremental builds during development.
+opt-level = 0
+debug = true
