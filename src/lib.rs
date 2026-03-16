@@ -37,8 +37,6 @@ use std::os::raw::c_char;
 use std::panic;
 
 use session::Session;
-use types::{ClassLayout, FunctionInfo};
-
 pub use types::*;
 
 // ============================================================================
@@ -210,8 +208,8 @@ pub extern "C" fn ark_pdb_find_class_layout(
             return Some(layout.clone());
         }
 
-        let raw_ti = type_index::lookup_name(s.name_index(), name_str)?.raw_ti;
-        let layout = field_list::extract_class_layout(&s.type_stream, name_str, raw_ti)?;
+        let type_idx = type_index::lookup_name(s.name_index(), name_str)?.type_index;
+        let layout = field_list::extract_class_layout(&s.type_stream, name_str, type_idx)?;
         s.layout_cache.insert(name_str.to_owned(), layout.clone());
         Some(layout)
     });
@@ -334,13 +332,13 @@ pub extern "C" fn ark_pdb_find_class_functions(
             return Some(funcs.clone());
         }
 
-        let raw_ti = type_index::lookup_name(s.name_index(), name_str)?.raw_ti;
+        let type_idx = type_index::lookup_name(s.name_index(), name_str)?.type_index;
         let sym_index = s.symbol_index();
         let funcs = field_list::extract_class_functions(
             &s.type_stream,
             sym_index,
             name_str,
-            raw_ti,
+            type_idx,
         );
         s.function_cache.insert(name_str.to_owned(), funcs.clone());
         Some(funcs)
@@ -376,7 +374,8 @@ pub extern "C" fn ark_pdb_funclist_get_name(
     buf: *mut c_char,
     buf_len: usize,
 ) {
-    if let Some(f) = unsafe { (*handle).functions.get(index as usize) } {
+    let h = unsafe { &*handle };
+    if let Some(f) = h.functions.get(index as usize) {
         write_cstr(buf, buf_len, &f.name);
     }
 }
@@ -390,7 +389,8 @@ pub extern "C" fn ark_pdb_funclist_get_decorated_name(
     buf: *mut c_char,
     buf_len: usize,
 ) {
-    if let Some(f) = unsafe { (*handle).functions.get(index as usize) } {
+    let h = unsafe { &*handle };
+    if let Some(f) = h.functions.get(index as usize) {
         write_cstr(buf, buf_len, &f.decorated_name);
     }
 }
@@ -403,50 +403,38 @@ pub extern "C" fn ark_pdb_funclist_get_return_type(
     buf: *mut c_char,
     buf_len: usize,
 ) {
-    if let Some(f) = unsafe { (*handle).functions.get(index as usize) } {
+    let h = unsafe { &*handle };
+    if let Some(f) = h.functions.get(index as usize) {
         write_cstr(buf, buf_len, &f.return_type);
     }
 }
 
 /// Return `true` if function at `index` is static.
 #[no_mangle]
-pub extern "C" fn ark_pdb_funclist_is_static(
-    handle: *const ArkFunctionListHandle,
-    index: i32,
-) -> bool {
-    unsafe { (*handle).functions.get(index as usize).map_or(false, |f| f.is_static) }
+pub extern "C" fn ark_pdb_funclist_is_static(handle: *const ArkFunctionListHandle, index: i32) -> bool {
+    let h = unsafe { &*handle };
+    h.functions.get(index as usize).map_or(false, |f| f.is_static)
 }
 
 /// Return `true` if function at `index` is virtual or pure virtual.
 #[no_mangle]
-pub extern "C" fn ark_pdb_funclist_is_virtual(
-    handle: *const ArkFunctionListHandle,
-    index: i32,
-) -> bool {
-    unsafe { (*handle).functions.get(index as usize).map_or(false, |f| f.is_virtual) }
+pub extern "C" fn ark_pdb_funclist_is_virtual(handle: *const ArkFunctionListHandle, index: i32) -> bool {
+    let h = unsafe { &*handle };
+    h.functions.get(index as usize).map_or(false, |f| f.is_virtual)
 }
 
 /// Return `true` if function at `index` is const-qualified.
 #[no_mangle]
-pub extern "C" fn ark_pdb_funclist_is_const(
-    handle: *const ArkFunctionListHandle,
-    index: i32,
-) -> bool {
-    unsafe { (*handle).functions.get(index as usize).map_or(false, |f| f.is_const) }
+pub extern "C" fn ark_pdb_funclist_is_const(handle: *const ArkFunctionListHandle, index: i32) -> bool {
+    let h = unsafe { &*handle };
+    h.functions.get(index as usize).map_or(false, |f| f.is_const)
 }
 
 /// Return the number of parameters of function at `func_index`.
 #[no_mangle]
-pub extern "C" fn ark_pdb_funclist_get_param_count(
-    handle: *const ArkFunctionListHandle,
-    func_index: i32,
-) -> i32 {
-    unsafe {
-        (*handle)
-            .functions
-            .get(func_index as usize)
-            .map_or(0, |f| f.params.len() as i32)
-    }
+pub extern "C" fn ark_pdb_funclist_get_param_count(handle: *const ArkFunctionListHandle, func_index: i32) -> i32 {
+    let h = unsafe { &*handle };
+    h.functions.get(func_index as usize).map_or(0, |f| f.params.len() as i32)
 }
 
 /// Write the name of parameter `param_index` of function `func_index` into `buf`.
@@ -458,7 +446,8 @@ pub extern "C" fn ark_pdb_funclist_get_param_name(
     buf: *mut c_char,
     buf_len: usize,
 ) {
-    if let Some(f) = unsafe { (*handle).functions.get(func_index as usize) } {
+    let h = unsafe { &*handle };
+    if let Some(f) = h.functions.get(func_index as usize) {
         if let Some(p) = f.params.get(param_index as usize) {
             write_cstr(buf, buf_len, &p.name);
         }
@@ -474,7 +463,8 @@ pub extern "C" fn ark_pdb_funclist_get_param_type(
     buf: *mut c_char,
     buf_len: usize,
 ) {
-    if let Some(f) = unsafe { (*handle).functions.get(func_index as usize) } {
+    let h = unsafe { &*handle };
+    if let Some(f) = h.functions.get(func_index as usize) {
         if let Some(p) = f.params.get(param_index as usize) {
             write_cstr(buf, buf_len, &p.type_name);
         }

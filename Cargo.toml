@@ -9,7 +9,7 @@ license = "MIT"
 name = "ark_pdb_reader"
 # cdylib  = shared library (.so) for runtime linking from C++
 # staticlib = archive (.a) for static linking
-crate-type = ["cdylib", "staticlib"]
+crate-type = ["cdylib", "staticlib", "rlib"]
 
 [dependencies]
 # Official Microsoft PDB reading library. Provides direct access to all PDB
@@ -33,10 +33,6 @@ lto = "fat"
 codegen-units = 1
 # Strip debug symbols from the release binary to reduce .so size.
 strip = "symbols"
-# Abort on panic instead of unwinding - smaller binary, no unwinding overhead.
-# NOTE: the FFI boundary uses catch_unwind before this kicks in, so panics
-#       are always surfaced as errors rather than process termination.
-panic = "abort"
 
 [profile.dev]
 # Faster incremental builds during development.

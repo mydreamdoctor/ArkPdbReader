@@ -20,8 +20,7 @@
 ///   - Static methods, free functions, and non-MSVC-mangled names are skipped.
 
 use std::collections::HashMap;
-use ms_pdb::codeview::syms::iter::SymIter;
-use ms_pdb::codeview::syms::kind::SymKind;
+use ms_pdb::syms::{SymData, SymIter, SymKind};
 
 /// Map from lowercase "ClassName::MethodName" to one or more decorated names.
 pub type SymbolIndex = HashMap<String, Vec<String>>;
@@ -37,17 +36,16 @@ pub fn build_symbol_index(gss_data: &[u8]) -> SymbolIndex {
     let mut index: SymbolIndex = HashMap::with_capacity(32768);
 
     for sym in SymIter::new(gss_data) {
-        if sym.kind != SymKind::S_PUB32 {
+        if sym.kind != SymKind::S_PUB32 && sym.kind != SymKind::S_PUB32_ST {
             continue;
         }
 
-        // Parse the public symbol record to get the decorated name.
-        // S_PUB32 layout: PubSymFlags (u32), offset (u32), segment (u16),
-        //                 name (null-terminated string).
-        // The `name` field IS the decorated (mangled) C++ name.
-        let decorated = match extract_pub_name(sym.data) {
-            Some(n) => n,
-            None => continue,
+        let decorated = match sym.parse() {
+            Ok(SymData::Pub(p)) => match std::str::from_utf8(p.name.as_ref()) {
+                Ok(s) => s,
+                Err(_) => continue,
+            },
+            _ => continue,
         };
 
         // Only index MSVC-mangled C++ names — they start with '?'.
@@ -70,25 +68,6 @@ pub fn build_symbol_index(gss_data: &[u8]) -> SymbolIndex {
     }
 
     index
-}
-
-/// Extract the null-terminated name string from a raw S_PUB32 data payload.
-///
-/// S_PUB32 layout:
-///   flags:   u32  (4 bytes)  — PubSymFlags
-///   off:     u32  (4 bytes)  — section offset
-///   seg:     u16  (2 bytes)  — section index
-///   name:    null-terminated string starting at byte 10
-fn extract_pub_name(data: &[u8]) -> Option<&str> {
-    // Skip: flags(4) + off(4) + seg(2) = 10 bytes
-    const NAME_OFFSET: usize = 10;
-    if data.len() <= NAME_OFFSET {
-        return None;
-    }
-    let name_bytes = &data[NAME_OFFSET..];
-    // Find the null terminator.
-    let len = name_bytes.iter().position(|&b| b == 0).unwrap_or(name_bytes.len());
-    std::str::from_utf8(&name_bytes[..len]).ok()
 }
 
 /// Parse an MSVC-mangled symbol name to extract (ClassName, MethodName).
