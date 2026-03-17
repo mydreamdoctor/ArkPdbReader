@@ -190,6 +190,30 @@ bool ark_pdb_list_class_names(
     void*               user_data);
 
 /* -------------------------------------------------------------------------- */
+/* Symbol RVA lookup                                                          */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Look up the RVA (Relative Virtual Address) of a public symbol by its
+ * decorated (mangled) name.
+ *
+ * The decorated name must match exactly, including the leading '?' for C++
+ * symbols, e.g. "?GUObjectArray@@3VFUObjectArray@@A".
+ *
+ * Building the symbol index takes O(N) in the number of public symbols on
+ * the first call; subsequent calls reuse the cached index.
+ *
+ * @param session        Open session handle.
+ * @param decorated_name Exact decorated name (null-terminated UTF-8).
+ * @param out_rva        Receives the 64-bit RVA on success. May be NULL.
+ * @return               true if found and out_rva written; false otherwise.
+ */
+bool ark_pdb_find_symbol_rva(
+    ArkPdbSession* session,
+    const char*    decorated_name,
+    uint64_t*      out_rva);
+
+/* -------------------------------------------------------------------------- */
 /* Type existence check                                                       */
 /* -------------------------------------------------------------------------- */
 

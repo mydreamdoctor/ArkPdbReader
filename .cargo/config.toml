@@ -1,0 +1,4 @@
+# Cross-compilation linker for Windows GNU target.
+# Used when building from Linux with MinGW-w64.
+[target.x86_64-pc-windows-gnu]
+linker = "x86_64-w64-mingw32-gcc"
