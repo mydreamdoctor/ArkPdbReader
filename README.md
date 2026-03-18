@@ -35,22 +35,64 @@ list — no repeated scans.
 
 ## Building
 
-**Requires**: Rust 1.75+.  Install from <https://rustup.rs>.
+The library is written entirely in Rust. No C or C++ compiler is needed to
+build the library itself — only to build your own project that links against it.
+
+**Requires:** Rust 1.75+ — install from <https://rustup.rs>.
+
+### Linux (native)
+
+```bash
+cargo build --release
+```
+
+Outputs (all produced in a single build):
+| File | Description |
+|------|-------------|
+| `target/release/libark_pdb_reader.so` | Shared library (1.1 MB) — link dynamically, ship alongside your binary |
+| `target/release/libark_pdb_reader.a` | Static archive (29 MB) — link statically, no runtime dependency |
+
+### Windows (native, from a Windows host)
 
 ```bash
 cargo build --release
 ```
 
 Outputs:
-- `target/release/libark_pdb_reader.so`   — shared library
-- `target/release/libark_pdb_reader.a`    — static archive
+| File | Description |
+|------|-------------|
+| `target/release/ark_pdb_reader.dll` | Shared library — ship alongside your executable |
+| `target/release/ark_pdb_reader.dll.lib` | Import library — used by the linker at build time (MSVC) |
 
-The CMakeLists.txt in this repo can automate the Cargo build step:
+### Windows (cross-compiled from Linux)
+
+Requires the `x86_64-pc-windows-gnu` target and a MinGW-w64 linker:
+
+```bash
+rustup target add x86_64-pc-windows-gnu
+cargo build --release --target x86_64-pc-windows-gnu
+```
+
+Outputs appear in `target/x86_64-pc-windows-gnu/release/`:
+| File | Description |
+|------|-------------|
+| `ark_pdb_reader.dll` | Shared library |
+| `libark_pdb_reader.dll.a` | Import library (MinGW format) |
+
+### CMake integration
+
+The included `CMakeLists.txt` creates an imported `ark-pdb-reader` target that
+handles platform differences automatically. It can optionally run `cargo build`
+for you during the CMake build step:
 
 ```cmake
-add_subdirectory(ArkPdbReader)
+add_subdirectory(path/to/ArkPdbReader)
 target_link_libraries(my_target PRIVATE ark-pdb-reader)
 ```
+
+Set `ARK_PDB_READER_BUILD_RUST=OFF` if you prefer to run `cargo build` yourself
+before configuring CMake. See [`docs/integration-guide.md`](docs/integration-guide.md)
+for full details.
 
 ---
 
