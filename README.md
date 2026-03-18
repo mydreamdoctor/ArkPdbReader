@@ -2,10 +2,9 @@
 
 > **License:** This project is source-available under a [custom non-commercial license](LICENSE). You may view, modify, and use it in open-source projects with attribution. Commercial use is not permitted.
 
-High-performance PDB reader for the ARK: Survival Ascended dedicated server PDB.
-Designed as a drop-in replacement for the LLVM PDB backend in
-[ArkSdkGen](../ArkSdkGen), fixing the core problem where LLVM's high-level API
-returns 0 members and 0 functions for game classes.
+High-performance PDB reader for Unreal Engine game PDB files. Extracts class
+layouts, member functions, and symbol RVAs from PDB files that the LLVM and DIA
+backends struggle with.
 
 ---
 
@@ -15,15 +14,14 @@ A Rust library that reads PDB files by parsing the **CodeView TPI stream**
 directly — the same raw data the Windows DIA SDK uses.
 
 The library exposes a **C API** (`include/ark_pdb_reader.h`) and a **C++ RAII
-wrapper** (`include/ark_pdb_reader.hpp`) so it can be consumed from the
-existing C++ codebase in ArkSdkGen without any Rust knowledge required.
+wrapper** (`include/ark_pdb_reader.hpp`) so it can be consumed from any C or
+C++ project without any Rust knowledge required.
 
 ### Why not LLVM?
 
 LLVM's `IPDBSession::findAllChildren` API performs repeated full-PDB scans and
-cannot reliably walk `LF_FIELDLIST` records in the ASA PDB.  The result is 0
-members and 0 functions for every class, making the Linux generator unusable
-for real work.
+cannot reliably walk `LF_FIELDLIST` records in large game PDBs.  The result is
+0 members and 0 functions for every class, making it unusable for real work.
 
 ### Why direct TPI parsing?
 
@@ -93,17 +91,10 @@ int main() {
 
 ---
 
-## Integrating into ArkSdkGen
+## Integration
 
-See [`docs/integration-guide.md`](docs/integration-guide.md) for the full
-step-by-step instructions. The short version:
-
-1. `cargo build --release` in this directory.
-2. Create `ArkSdkGen/src/native/pdb_reader_pdbrs.cpp` using the template in
-   the integration guide.
-3. In `ArkSdkGen/CMakeLists.txt`, replace the Linux/LLVM block with an
-   `add_subdirectory(../ArkPdbReader ...)` + `target_link_libraries(... ark-pdb-reader)`.
-4. No other ArkSdkGen files need to change.
+See [`docs/integration-guide.md`](docs/integration-guide.md) for a detailed
+walkthrough of adding ArkPdbReader to a C++ CMake project.
 
 ---
 
@@ -126,25 +117,8 @@ step-by-step instructions. The short version:
   (name + type), `isVirtual`, `isStatic`, `isConst` flags
 
 **Not extracted (current version):**
-- Static data members (no instance offset — not needed by the generator)
+- Static data members (no instance offset)
 - Operator overloads and constructors/destructors (intentionally excluded)
 - Full template argument expansion (template names are included verbatim)
 - Per-parameter names from PDB (parameter names are `param0`, `param1`, ...
-  since the ASA PDB does not reliably store them)
-- `FindSymbolRVA` — not needed for SDK generation
-
----
-
-## Repository context
-
-This project is part of the
-[CSHARPAPI workspace](../WORKSPACE.md) used to build the
-ARK: Survival Ascended C# server plugin SDK.
-
-```
-CSHARPAPI/
-├── ArkCSharpAPI/       main C# plugin runtime and SDK
-├── ArkSdkGen/          SDK definition generator (consumer of this library)
-├── ArkPdbReader/       ← this repo
-└── ArkPlugin-Template/ beginner plugin template
-```
+  since large game PDBs do not reliably store them)

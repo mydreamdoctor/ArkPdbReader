@@ -1,8 +1,8 @@
 # ArkPdbReader — API Contract
 
 This document defines the exact behaviour contract for `ArkPdbReader`. It is
-the authoritative reference for anyone integrating this library into ArkSdkGen
-or any other consumer.
+the authoritative reference for anyone integrating this library into their
+project.
 
 ---
 
