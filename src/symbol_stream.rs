@@ -25,6 +25,9 @@ use ms_pdb::syms::{SymData, SymIter, SymKind};
 /// Map from lowercase "ClassName::MethodName" to one or more decorated names.
 pub type SymbolIndex = HashMap<String, Vec<String>>;
 
+/// Map from exact decorated name to RVA (relative virtual address).
+pub type PubRvaIndex = HashMap<String, u64>;
+
 /// Build the symbol index by scanning the Global Symbol Stream (GSS).
 ///
 /// The GSS is a flat byte sequence of symbol records.  We iterate public
@@ -121,4 +124,38 @@ pub fn lookup_decorated_names<'a>(
         method_name.to_lowercase()
     );
     index.get(&key).map(Vec::as_slice).unwrap_or(&[])
+}
+
+/// Build a map from exact decorated name to RVA by scanning the GSS.
+///
+/// `section_vaddrs` is the list of section virtual addresses (1-based):
+/// section N → `section_vaddrs[N-1]`.  Symbols whose section index is out of
+/// range are silently skipped.
+///
+/// RVA = `section_vaddrs[segment - 1] + offset`
+pub fn build_pub_rva_index(gss_data: &[u8], section_vaddrs: &[u32]) -> PubRvaIndex {
+    let mut index: PubRvaIndex = HashMap::with_capacity(65536);
+
+    for sym in SymIter::new(gss_data) {
+        if sym.kind != SymKind::S_PUB32 && sym.kind != SymKind::S_PUB32_ST {
+            continue;
+        }
+
+        if let Ok(SymData::Pub(p)) = sym.parse() {
+            let seg = p.fixed.offset_segment.segment() as usize;
+            let off = p.fixed.offset_segment.offset() as u64;
+
+            if seg == 0 || seg > section_vaddrs.len() {
+                continue;
+            }
+
+            let rva = section_vaddrs[seg - 1] as u64 + off;
+
+            if let Ok(name) = std::str::from_utf8(p.name.as_ref()) {
+                index.insert(name.to_owned(), rva);
+            }
+        }
+    }
+
+    index
 }

@@ -19,8 +19,10 @@ use ark_pdb_reader::{
     ark_pdb_find_class_functions,
     ark_pdb_funclist_free, ark_pdb_funclist_get_count,
     ark_pdb_funclist_get_name, ark_pdb_funclist_get_return_type,
+    ark_pdb_funclist_get_decorated_name,
     ark_pdb_funclist_is_virtual, ark_pdb_funclist_is_static, ark_pdb_funclist_is_const,
     ark_pdb_funclist_get_param_count, ark_pdb_funclist_get_param_type,
+    ark_pdb_find_symbol_rva,
 };
 
 fn cstr(s: &str) -> CString { CString::new(s).unwrap() }
@@ -136,10 +138,12 @@ fn main() {
         let mut nbuf = [0u8; 256];
         let mut rbuf = [0u8; 512];
         let mut pbuf = [0u8; 512];
+        let mut dbuf = [0u8; 512];
         for i in 0..count {
             unsafe {
                 ark_pdb_funclist_get_name(funcs, i, nbuf.as_mut_ptr() as *mut c_char, 256);
                 ark_pdb_funclist_get_return_type(funcs, i, rbuf.as_mut_ptr() as *mut c_char, 512);
+                ark_pdb_funclist_get_decorated_name(funcs, i, dbuf.as_mut_ptr() as *mut c_char, 512);
             }
             let is_v = unsafe { ark_pdb_funclist_is_virtual(funcs, i) };
             let is_s = unsafe { ark_pdb_funclist_is_static(funcs, i) };
@@ -158,17 +162,32 @@ fn main() {
                 if is_s { "S" } else { " " },
                 if is_c { "C" } else { " " },
             );
+            let dname = read_buf(&dbuf);
             println!(
-                "  [{}] {} {}({}) -> {}",
+                "  [{}] {} {}({}) -> {}{}",
                 flags,
                 read_buf(&nbuf),
                 param_types.join(", "),
                 "",
                 read_buf(&rbuf),
+                if dname.is_empty() { String::new() } else { format!("  [{}]", dname) },
             );
         }
 
         unsafe { ark_pdb_funclist_free(funcs) };
+    }
+
+    // ── Symbol RVA lookup (test with the first decorated name we know) ──────
+    if let Some(rva_query) = args.get(3) {
+        println!("\n── RVA of '{}' ──", rva_query);
+        let sym_cstr = cstr(rva_query);
+        let mut rva: u64 = 0;
+        let found = unsafe { ark_pdb_find_symbol_rva(session, sym_cstr.as_ptr(), &mut rva) };
+        if found {
+            println!("  RVA = 0x{:016x}", rva);
+        } else {
+            println!("  Symbol not found");
+        }
     }
 
     unsafe { ark_pdb_close(session) };

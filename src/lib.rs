@@ -472,6 +472,45 @@ pub extern "C" fn ark_pdb_funclist_get_param_type(
 }
 
 // ============================================================================
+// Symbol RVA lookup
+// ============================================================================
+
+/// Look up the RVA (Relative Virtual Address) of a public symbol by its
+/// exact MSVC-decorated (mangled) name.
+///
+/// The decorated name must match exactly, including the leading `?` for C++
+/// symbols, e.g. `?GetPlayerName@APlayerController@@QEAA?AVFString@@XZ`.
+///
+/// Returns `true` and writes the 64-bit RVA into `*out_rva` on success.
+/// Returns `false` if the symbol is not found, if `decorated_name` is null
+/// or invalid UTF-8, or on internal error.
+/// `out_rva` may be null (the function still returns `true` if found).
+#[no_mangle]
+pub extern "C" fn ark_pdb_find_symbol_rva(
+    session: *mut Session,
+    decorated_name: *const c_char,
+    out_rva: *mut u64,
+) -> bool {
+    let name_str = match to_rust_str(decorated_name) {
+        Some(s) => s,
+        None => return false,
+    };
+
+    ffi_guard(session, |s| {
+        let index = s.pub_rva_index();
+        match index.get(name_str) {
+            Some(&rva) => {
+                if !out_rva.is_null() {
+                    unsafe { *out_rva = rva; }
+                }
+                true
+            }
+            None => false,
+        }
+    })
+}
+
+// ============================================================================
 // Internal utilities
 // ============================================================================
 
