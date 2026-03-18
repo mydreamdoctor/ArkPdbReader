@@ -1,5 +1,7 @@
 # ArkPdbReader
 
+> **License:** This project is source-available under a [custom non-commercial license](LICENSE). You may view, modify, and use it in open-source projects with attribution. Commercial use is not permitted.
+
 High-performance PDB reader for the ARK: Survival Ascended dedicated server PDB.
 Designed as a drop-in replacement for the LLVM PDB backend in
 [ArkSdkGen](../ArkSdkGen), fixing the core problem where LLVM's high-level API
