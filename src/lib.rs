@@ -39,6 +39,23 @@ use std::panic;
 use session::Session;
 pub use types::*;
 
+#[allow(non_camel_case_types)]
+#[repr(C)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ArkPdbTypeKind {
+    ARK_PDB_TYPE_KIND_CLASS = 1,
+    ARK_PDB_TYPE_KIND_STRUCT = 2,
+}
+
+impl From<type_index::TypeKind> for ArkPdbTypeKind {
+    fn from(value: type_index::TypeKind) -> Self {
+        match value {
+            type_index::TypeKind::Class => Self::ARK_PDB_TYPE_KIND_CLASS,
+            type_index::TypeKind::Struct => Self::ARK_PDB_TYPE_KIND_STRUCT,
+        }
+    }
+}
+
 // ============================================================================
 // Session lifecycle
 // ============================================================================
@@ -109,6 +126,14 @@ pub type ArkClassNameCallback = unsafe extern "C" fn(
     user_data: *mut std::ffi::c_void,
 ) -> bool;
 
+/// Callback called once per lightweight type entry in `ark_pdb_list_type_entries`.
+/// Return `true` to continue, `false` to stop early.
+pub type ArkTypeEntryCallback = unsafe extern "C" fn(
+    name: *const c_char,
+    kind: ArkPdbTypeKind,
+    user_data: *mut std::ffi::c_void,
+) -> bool;
+
 /// Enumerate all Unreal Engine–style top-level class names from the PDB.
 ///
 /// Names pass the same prefix filter as the ArkSdkGen LLVM backend:
@@ -135,6 +160,37 @@ pub extern "C" fn ark_pdb_list_class_names(
         for name in names {
             if let Ok(c) = CString::new(name) {
                 if !unsafe { callback(c.as_ptr(), user_data) } {
+                    break;
+                }
+            }
+        }
+        true
+    })
+}
+
+/// Enumerate all Unreal Engine–style top-level type entries from the cached index.
+///
+/// Types pass the same prefix filter as `ark_pdb_list_class_names`, but each
+/// callback also receives the UDT kind captured during the one-time TPI index
+/// build. This does not add a second PDB pass.
+#[no_mangle]
+pub extern "C" fn ark_pdb_list_type_entries(
+    session: *mut Session,
+    callback: ArkTypeEntryCallback,
+    user_data: *mut std::ffi::c_void,
+) -> bool {
+    ffi_guard(session, |s| {
+        let index = s.name_index();
+        let mut entries: Vec<(&str, ArkPdbTypeKind)> = index
+            .values()
+            .filter(|e| type_index::is_ue_top_level_class(&e.canonical_name))
+            .map(|e| (e.canonical_name.as_str(), ArkPdbTypeKind::from(e.kind)))
+            .collect();
+        entries.sort_unstable_by(|left, right| left.0.cmp(right.0));
+
+        for (name, kind) in entries {
+            if let Ok(c) = CString::new(name) {
+                if !unsafe { callback(c.as_ptr(), kind, user_data) } {
                     break;
                 }
             }

@@ -75,9 +75,11 @@ int main() {
         return 1;
     }
 
-    // Enumerate class names.
-    pdb.listClassNames([](std::string_view name) {
-        std::cout << name << "\n";
+    // Enumerate type entries with cached class/struct kind.
+    pdb.listTypeEntries([](const ark::TypeEntryView& entry) {
+        std::cout << entry.name << " ("
+                  << (entry.kind == ark::TypeKind::Struct ? "struct" : "class")
+                  << ")\n";
         return true;  // return false to stop early
     });
 

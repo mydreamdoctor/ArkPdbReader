@@ -96,6 +96,16 @@ namespace ark {
 // Value types
 // ============================================================================
 
+enum class TypeKind {
+    Class = ARK_PDB_TYPE_KIND_CLASS,
+    Struct = ARK_PDB_TYPE_KIND_STRUCT
+};
+
+struct TypeEntryView {
+    std::string name;
+    TypeKind kind = TypeKind::Class;
+};
+
 /** One data member of a class. */
 struct MemberView {
     std::string name;
@@ -397,6 +407,31 @@ public:
     // -- Class name enumeration --------------------------------------------
 
     /**
+     * Enumerate Unreal Engine–style type entries with cached class/struct kind.
+     *
+     * @param callback  Called with each entry (name + kind) in sorted order.
+     *                  Return true to continue, false to stop.
+     * @return          true on success, false on error.
+     */
+    template <typename Fn>
+    bool listTypeEntries(Fn&& callback) const {
+        struct Ctx {
+            Fn* fn;
+        } ctx{ &callback };
+
+        return ark_pdb_list_type_entries(
+            session_,
+            [](const char* name, ArkPdbTypeKind kind, void* ud) -> bool {
+                auto* c = static_cast<Ctx*>(ud);
+                return (*c->fn)(TypeEntryView{
+                    std::string(name),
+                    kind == ARK_PDB_TYPE_KIND_STRUCT ? TypeKind::Struct : TypeKind::Class
+                });
+            },
+            &ctx);
+    }
+
+    /**
      * Enumerate Unreal Engine–style class names.
      *
      * @param callback  Called with each name (std::string_view) in sorted
@@ -405,17 +440,9 @@ public:
      */
     template <typename Fn>
     bool listClassNames(Fn&& callback) const {
-        struct Ctx {
-            Fn* fn;
-        } ctx{ &callback };
-
-        return ark_pdb_list_class_names(
-            session_,
-            [](const char* name, void* ud) -> bool {
-                auto* c = static_cast<Ctx*>(ud);
-                return (*c->fn)(std::string_view(name));
-            },
-            &ctx);
+        return listTypeEntries([&](const TypeEntryView& entry) {
+            return callback(std::string_view(entry.name));
+        });
     }
 
     // -- Type existence ----------------------------------------------------

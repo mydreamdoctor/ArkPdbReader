@@ -119,6 +119,15 @@ typedef struct ArkLayoutHandle ArkLayoutHandle;
 typedef struct ArkFunctionListHandle ArkFunctionListHandle;
 
 /* -------------------------------------------------------------------------- */
+/* Lightweight type enumeration                                               */
+/* -------------------------------------------------------------------------- */
+
+typedef enum ArkPdbTypeKind {
+    ARK_PDB_TYPE_KIND_CLASS = 1,
+    ARK_PDB_TYPE_KIND_STRUCT = 2
+} ArkPdbTypeKind;
+
+/* -------------------------------------------------------------------------- */
 /* Session lifecycle                                                          */
 /* -------------------------------------------------------------------------- */
 
@@ -169,6 +178,16 @@ const char* ark_pdb_last_error(const ArkPdbSession* session);
 typedef bool (*ArkClassNameCallback)(const char* name, void* user_data);
 
 /**
+ * Callback type for ark_pdb_list_type_entries.
+ *
+ * @param name       Null-terminated UTF-8 type name.
+ * @param kind       Lightweight kind captured from the UDT record.
+ * @param user_data  The pointer passed to ark_pdb_list_type_entries.
+ * @return           true to continue enumeration, false to stop early.
+ */
+typedef bool (*ArkTypeEntryCallback)(const char* name, ArkPdbTypeKind kind, void* user_data);
+
+/**
  * Enumerate all Unreal Engine–style class and struct names from the PDB.
  *
  * Only names matching the UE top-level class pattern are included:
@@ -188,6 +207,23 @@ bool ark_pdb_list_class_names(
     ArkPdbSession*      session,
     ArkClassNameCallback callback,
     void*               user_data);
+
+/**
+ * Enumerate all Unreal Engine–style class and struct names with kind.
+ *
+ * This reuses the cached TPI name index built on first use. The reported kind
+ * is captured during that same one-time index build, so enumeration does not
+ * trigger a second full pass over the PDB.
+ *
+ * @param session    Open session handle.
+ * @param callback   Called once per type entry.
+ * @param user_data  Forwarded to every callback invocation.
+ * @return           true on success, false on error.
+ */
+bool ark_pdb_list_type_entries(
+    ArkPdbSession*       session,
+    ArkTypeEntryCallback callback,
+    void*                user_data);
 
 /* -------------------------------------------------------------------------- */
 /* Symbol RVA lookup                                                          */

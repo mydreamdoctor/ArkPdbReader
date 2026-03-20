@@ -106,9 +106,11 @@ int main() {
     ark::PdbSession pdb("/path/to/ShooterGame.pdb");
     if (!pdb) { std::cerr << "open failed\n"; return 1; }
 
-    // List UE-style class names (AXxx, UXxx, FXxx, ...)
-    pdb.listClassNames([](std::string_view name) {
-        std::cout << name << "\n";
+    // List UE-style type entries with cached kind.
+    pdb.listTypeEntries([](const ark::TypeEntryView& entry) {
+        std::cout << entry.name << " (" 
+                  << (entry.kind == ark::TypeKind::Struct ? "struct" : "class")
+                  << ")\n";
         return true;
     });
 

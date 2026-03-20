@@ -8,6 +8,13 @@ use ms_pdb::types::{Leaf, TypeData, TypeIndex};
 
 use crate::type_name::bstr_to_string;
 
+/// Lightweight kind carried in the cached UDT name index.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TypeKind {
+    Class,
+    Struct,
+}
+
 /// Entry stored in the name index for each known UDT.
 #[derive(Debug, Clone)]
 pub struct NameEntry {
@@ -15,6 +22,8 @@ pub struct NameEntry {
     pub type_index: TypeIndex,
     /// The canonical (exact case) name as stored in the PDB.
     pub canonical_name: String,
+    /// Whether this UDT was declared as a class or struct in TPI.
+    pub kind: TypeKind,
     /// True if this entry is a forward reference (incomplete definition).
     pub is_forward_ref: bool,
 }
@@ -35,10 +44,11 @@ pub fn build_name_index(type_stream: &TypeStream<Vec<u8>>) -> NameIndex {
         let ti = TypeIndex(current_ti);
         current_ti += 1;
 
-        match record.kind {
-            Leaf::LF_CLASS | Leaf::LF_STRUCTURE | Leaf::LF_INTERFACE => {}
+        let kind = match record.kind {
+            Leaf::LF_CLASS | Leaf::LF_INTERFACE => TypeKind::Class,
+            Leaf::LF_STRUCTURE => TypeKind::Struct,
             _ => continue,
-        }
+        };
 
         let td = match record.parse() {
             Ok(td) => td,
@@ -67,7 +77,7 @@ pub fn build_name_index(type_stream: &TypeStream<Vec<u8>>) -> NameIndex {
             _ => {}
         }
 
-        index.insert(key, NameEntry { type_index: ti, canonical_name: name, is_forward_ref: is_fwd });
+        index.insert(key, NameEntry { type_index: ti, canonical_name: name, kind, is_forward_ref: is_fwd });
     }
 
     index
