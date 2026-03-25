@@ -1,3 +1,4 @@
+use ms_pdb::syms::{SymData, SymIter, SymKind};
 /// Builds a decorated-name index from the PDB Public Symbol Index (PSI).
 ///
 /// Decorated (mangled) C++ names look like:
@@ -18,9 +19,7 @@
 ///   - Nested class methods (Outer::Inner::Method) only extract the
 ///     innermost class name and may be ambiguous.
 ///   - Static methods, free functions, and non-MSVC-mangled names are skipped.
-
 use std::collections::HashMap;
-use ms_pdb::syms::{SymData, SymIter, SymKind};
 
 /// Map from lowercase "ClassName::MethodName" to one or more decorated names.
 pub type SymbolIndex = HashMap<String, Vec<String>>;
@@ -63,10 +62,7 @@ pub fn build_symbol_index(gss_data: &[u8]) -> SymbolIndex {
                 class_name.to_lowercase(),
                 method_name.to_lowercase()
             );
-            index
-                .entry(key)
-                .or_default()
-                .push(decorated.to_owned());
+            index.entry(key).or_default().push(decorated.to_owned());
         }
     }
 

@@ -83,6 +83,12 @@ int main() {
         return true;  // return false to stop early
     });
 
+    // Enumerate display-ready symbol entries.
+    pdb.listSymbolEntries(true, true, [](const ark::SymbolEntryView& entry) {
+        std::cout << static_cast<int>(entry.kind) << ": " << entry.name << "\n";
+        return true;
+    });
+
     // Get class layout (members).
     auto layout = pdb.getClassLayout("ACharacter");
     if (layout) {
@@ -115,7 +121,7 @@ int main() {
 
     // Look up a symbol RVA by its decorated name.
     uint64_t rva = 0;
-    if (pdb.findSymbolRVA("?MyFunc@ACharacter@@QEAAXXZ", rva)) {
+    if (pdb.findSymbolRva("?MyFunc@ACharacter@@QEAAXXZ", &rva)) {
         std::cout << "RVA = 0x" << std::hex << rva << "\n";
     }
 }

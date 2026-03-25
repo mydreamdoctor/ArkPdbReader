@@ -24,9 +24,9 @@
 ///
 /// All `const char*` parameters must be valid non-null null-terminated
 /// UTF-8 C strings for the duration of the call.
-
 mod field_list;
 mod session;
+mod symbol_catalog;
 mod symbol_stream;
 mod type_index;
 mod type_name;
@@ -52,6 +52,35 @@ impl From<type_index::TypeKind> for ArkPdbTypeKind {
         match value {
             type_index::TypeKind::Class => Self::ARK_PDB_TYPE_KIND_CLASS,
             type_index::TypeKind::Struct => Self::ARK_PDB_TYPE_KIND_STRUCT,
+        }
+    }
+}
+
+#[allow(non_camel_case_types)]
+#[repr(C)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ArkPdbSymbolKind {
+    ARK_PDB_SYMBOL_KIND_CLASS = 1,
+    ARK_PDB_SYMBOL_KIND_STRUCT = 2,
+    ARK_PDB_SYMBOL_KIND_UNION = 3,
+    ARK_PDB_SYMBOL_KIND_ENUM = 4,
+    ARK_PDB_SYMBOL_KIND_GLOBAL_FUNCTION = 5,
+    ARK_PDB_SYMBOL_KIND_GLOBAL_SYMBOL = 6,
+}
+
+impl From<symbol_catalog::SymbolEntryKind> for ArkPdbSymbolKind {
+    fn from(value: symbol_catalog::SymbolEntryKind) -> Self {
+        match value {
+            symbol_catalog::SymbolEntryKind::Class => Self::ARK_PDB_SYMBOL_KIND_CLASS,
+            symbol_catalog::SymbolEntryKind::Struct => Self::ARK_PDB_SYMBOL_KIND_STRUCT,
+            symbol_catalog::SymbolEntryKind::Union => Self::ARK_PDB_SYMBOL_KIND_UNION,
+            symbol_catalog::SymbolEntryKind::Enum => Self::ARK_PDB_SYMBOL_KIND_ENUM,
+            symbol_catalog::SymbolEntryKind::GlobalFunction => {
+                Self::ARK_PDB_SYMBOL_KIND_GLOBAL_FUNCTION
+            }
+            symbol_catalog::SymbolEntryKind::GlobalSymbol => {
+                Self::ARK_PDB_SYMBOL_KIND_GLOBAL_SYMBOL
+            }
         }
     }
 }
@@ -121,16 +150,22 @@ pub extern "C" fn ark_pdb_last_error(session: *const Session) -> *const c_char {
 
 /// Callback called once per class name in `ark_pdb_list_class_names`.
 /// Return `true` to continue, `false` to stop early.
-pub type ArkClassNameCallback = unsafe extern "C" fn(
-    name: *const c_char,
-    user_data: *mut std::ffi::c_void,
-) -> bool;
+pub type ArkClassNameCallback =
+    unsafe extern "C" fn(name: *const c_char, user_data: *mut std::ffi::c_void) -> bool;
 
 /// Callback called once per lightweight type entry in `ark_pdb_list_type_entries`.
 /// Return `true` to continue, `false` to stop early.
 pub type ArkTypeEntryCallback = unsafe extern "C" fn(
     name: *const c_char,
     kind: ArkPdbTypeKind,
+    user_data: *mut std::ffi::c_void,
+) -> bool;
+
+/// Callback called once per display-ready symbol entry in `ark_pdb_list_symbol_entries`.
+/// Return `true` to continue, `false` to stop early.
+pub type ArkSymbolEntryCallback = unsafe extern "C" fn(
+    name: *const c_char,
+    kind: ArkPdbSymbolKind,
     user_data: *mut std::ffi::c_void,
 ) -> bool;
 
@@ -195,6 +230,47 @@ pub extern "C" fn ark_pdb_list_type_entries(
                 }
             }
         }
+        true
+    })
+}
+
+/// Enumerate display-ready symbol entries collected from TPI, IPI, and PSI data.
+///
+/// Types and enums are always included. Global functions and public symbols are
+/// included only when their flags are set.
+#[no_mangle]
+pub extern "C" fn ark_pdb_list_symbol_entries(
+    session: *mut Session,
+    include_global_functions: bool,
+    include_public_symbols: bool,
+    callback: ArkSymbolEntryCallback,
+    user_data: *mut std::ffi::c_void,
+) -> bool {
+    ffi_guard(session, |s| {
+        let mut entries = symbol_catalog::collect_type_entries(&s.type_stream);
+
+        if include_global_functions {
+            entries.extend(symbol_catalog::collect_global_function_entries(
+                &s.ipi_stream,
+            ));
+        }
+
+        if include_public_symbols {
+            entries.extend(symbol_catalog::collect_public_symbol_entries(&s.gss_data));
+        }
+
+        symbol_catalog::sort_and_dedupe(&mut entries);
+
+        for entry in entries {
+            if let Ok(name) = CString::new(entry.name) {
+                if !unsafe {
+                    callback(name.as_ptr(), ArkPdbSymbolKind::from(entry.kind), user_data)
+                } {
+                    break;
+                }
+            }
+        }
+
         true
     })
 }
@@ -390,20 +466,14 @@ pub extern "C" fn ark_pdb_find_class_functions(
 
         let type_idx = type_index::lookup_name(s.name_index(), name_str)?.type_index;
         let sym_index = s.symbol_index();
-        let funcs = field_list::extract_class_functions(
-            &s.type_stream,
-            sym_index,
-            name_str,
-            type_idx,
-        );
+        let funcs =
+            field_list::extract_class_functions(&s.type_stream, sym_index, name_str, type_idx);
         s.function_cache.insert(name_str.to_owned(), funcs.clone());
         Some(funcs)
     });
 
     match result {
-        Some(functions) => {
-            Box::into_raw(Box::new(ArkFunctionListHandle { functions }))
-        }
+        Some(functions) => Box::into_raw(Box::new(ArkFunctionListHandle { functions })),
         None => std::ptr::null_mut(),
     }
 }
@@ -467,30 +537,50 @@ pub extern "C" fn ark_pdb_funclist_get_return_type(
 
 /// Return `true` if function at `index` is static.
 #[no_mangle]
-pub extern "C" fn ark_pdb_funclist_is_static(handle: *const ArkFunctionListHandle, index: i32) -> bool {
+pub extern "C" fn ark_pdb_funclist_is_static(
+    handle: *const ArkFunctionListHandle,
+    index: i32,
+) -> bool {
     let h = unsafe { &*handle };
-    h.functions.get(index as usize).map_or(false, |f| f.is_static)
+    h.functions
+        .get(index as usize)
+        .map_or(false, |f| f.is_static)
 }
 
 /// Return `true` if function at `index` is virtual or pure virtual.
 #[no_mangle]
-pub extern "C" fn ark_pdb_funclist_is_virtual(handle: *const ArkFunctionListHandle, index: i32) -> bool {
+pub extern "C" fn ark_pdb_funclist_is_virtual(
+    handle: *const ArkFunctionListHandle,
+    index: i32,
+) -> bool {
     let h = unsafe { &*handle };
-    h.functions.get(index as usize).map_or(false, |f| f.is_virtual)
+    h.functions
+        .get(index as usize)
+        .map_or(false, |f| f.is_virtual)
 }
 
 /// Return `true` if function at `index` is const-qualified.
 #[no_mangle]
-pub extern "C" fn ark_pdb_funclist_is_const(handle: *const ArkFunctionListHandle, index: i32) -> bool {
+pub extern "C" fn ark_pdb_funclist_is_const(
+    handle: *const ArkFunctionListHandle,
+    index: i32,
+) -> bool {
     let h = unsafe { &*handle };
-    h.functions.get(index as usize).map_or(false, |f| f.is_const)
+    h.functions
+        .get(index as usize)
+        .map_or(false, |f| f.is_const)
 }
 
 /// Return the number of parameters of function at `func_index`.
 #[no_mangle]
-pub extern "C" fn ark_pdb_funclist_get_param_count(handle: *const ArkFunctionListHandle, func_index: i32) -> i32 {
+pub extern "C" fn ark_pdb_funclist_get_param_count(
+    handle: *const ArkFunctionListHandle,
+    func_index: i32,
+) -> i32 {
     let h = unsafe { &*handle };
-    h.functions.get(func_index as usize).map_or(0, |f| f.params.len() as i32)
+    h.functions
+        .get(func_index as usize)
+        .map_or(0, |f| f.params.len() as i32)
 }
 
 /// Write the name of parameter `param_index` of function `func_index` into `buf`.
@@ -557,7 +647,9 @@ pub extern "C" fn ark_pdb_find_symbol_rva(
         match index.get(name_str) {
             Some(&rva) => {
                 if !out_rva.is_null() {
-                    unsafe { *out_rva = rva; }
+                    unsafe {
+                        *out_rva = rva;
+                    }
                 }
                 true
             }

@@ -2,30 +2,26 @@
 ///
 /// Run:
 ///   cargo run --release --example test_pdb -- /path/to/ArkAscendedServer.pdb [ClassName]
-
 use std::env;
 use std::ffi::{CStr, CString};
 use std::os::raw::c_char;
 
 // Import the public C API from the parent crate.
 use ark_pdb_reader::{
-    ark_pdb_open, ark_pdb_close,
-    ark_pdb_list_class_names, ArkClassNameCallback,
-    ark_pdb_find_class_layout,
-    ark_pdb_layout_free, ark_pdb_layout_get_base_class,
-    ark_pdb_layout_get_total_size, ark_pdb_layout_get_member_count,
-    ark_pdb_layout_get_member_name, ark_pdb_layout_get_member_type,
-    ark_pdb_layout_get_member_offset,
-    ark_pdb_find_class_functions,
-    ark_pdb_funclist_free, ark_pdb_funclist_get_count,
-    ark_pdb_funclist_get_name, ark_pdb_funclist_get_return_type,
-    ark_pdb_funclist_get_decorated_name,
-    ark_pdb_funclist_is_virtual, ark_pdb_funclist_is_static, ark_pdb_funclist_is_const,
+    ark_pdb_close, ark_pdb_find_class_functions, ark_pdb_find_class_layout,
+    ark_pdb_find_symbol_rva, ark_pdb_funclist_free, ark_pdb_funclist_get_count,
+    ark_pdb_funclist_get_decorated_name, ark_pdb_funclist_get_name,
     ark_pdb_funclist_get_param_count, ark_pdb_funclist_get_param_type,
-    ark_pdb_find_symbol_rva,
+    ark_pdb_funclist_get_return_type, ark_pdb_funclist_is_const, ark_pdb_funclist_is_static,
+    ark_pdb_funclist_is_virtual, ark_pdb_layout_free, ark_pdb_layout_get_base_class,
+    ark_pdb_layout_get_member_count, ark_pdb_layout_get_member_name,
+    ark_pdb_layout_get_member_offset, ark_pdb_layout_get_member_type,
+    ark_pdb_layout_get_total_size, ark_pdb_list_class_names, ark_pdb_open, ArkClassNameCallback,
 };
 
-fn cstr(s: &str) -> CString { CString::new(s).unwrap() }
+fn cstr(s: &str) -> CString {
+    CString::new(s).unwrap()
+}
 fn read_buf(buf: &[u8]) -> String {
     let end = buf.iter().position(|&b| b == 0).unwrap_or(buf.len());
     String::from_utf8_lossy(&buf[..end]).into_owned()
@@ -55,9 +51,16 @@ fn main() {
     let t1 = std::time::Instant::now();
     let mut class_names: Vec<String> = Vec::new();
 
-    unsafe extern "C" fn collect_name(name: *const c_char, user_data: *mut std::ffi::c_void) -> bool {
+    unsafe extern "C" fn collect_name(
+        name: *const c_char,
+        user_data: *mut std::ffi::c_void,
+    ) -> bool {
         let names = &mut *(user_data as *mut Vec<String>);
-        names.push(unsafe { CStr::from_ptr(name) }.to_string_lossy().into_owned());
+        names.push(
+            unsafe { CStr::from_ptr(name) }
+                .to_string_lossy()
+                .into_owned(),
+        );
         true
     }
 
@@ -80,7 +83,9 @@ fn main() {
         for name in class_names.iter().take(20) {
             println!("  {}", name);
         }
-        if class_names.len() > 20 { println!("  ..."); }
+        if class_names.len() > 20 {
+            println!("  ...");
+        }
 
         unsafe { ark_pdb_close(session) };
         return;
@@ -119,7 +124,12 @@ fn main() {
                 ark_pdb_layout_get_member_type(layout, i, tbuf.as_mut_ptr() as *mut c_char, 512);
             }
             let offset = unsafe { ark_pdb_layout_get_member_offset(layout, i) };
-            println!("  +{:5}  {:40}  {}", offset, read_buf(&tbuf), read_buf(&nbuf));
+            println!(
+                "  +{:5}  {:40}  {}",
+                offset,
+                read_buf(&tbuf),
+                read_buf(&nbuf)
+            );
         }
 
         unsafe { ark_pdb_layout_free(layout) };
@@ -143,7 +153,12 @@ fn main() {
             unsafe {
                 ark_pdb_funclist_get_name(funcs, i, nbuf.as_mut_ptr() as *mut c_char, 256);
                 ark_pdb_funclist_get_return_type(funcs, i, rbuf.as_mut_ptr() as *mut c_char, 512);
-                ark_pdb_funclist_get_decorated_name(funcs, i, dbuf.as_mut_ptr() as *mut c_char, 512);
+                ark_pdb_funclist_get_decorated_name(
+                    funcs,
+                    i,
+                    dbuf.as_mut_ptr() as *mut c_char,
+                    512,
+                );
             }
             let is_v = unsafe { ark_pdb_funclist_is_virtual(funcs, i) };
             let is_s = unsafe { ark_pdb_funclist_is_static(funcs, i) };
@@ -152,7 +167,15 @@ fn main() {
 
             let mut param_types: Vec<String> = Vec::new();
             for j in 0..nparams {
-                unsafe { ark_pdb_funclist_get_param_type(funcs, i, j, pbuf.as_mut_ptr() as *mut c_char, 512) };
+                unsafe {
+                    ark_pdb_funclist_get_param_type(
+                        funcs,
+                        i,
+                        j,
+                        pbuf.as_mut_ptr() as *mut c_char,
+                        512,
+                    )
+                };
                 param_types.push(read_buf(&pbuf));
             }
 
@@ -170,7 +193,11 @@ fn main() {
                 param_types.join(", "),
                 "",
                 read_buf(&rbuf),
-                if dname.is_empty() { String::new() } else { format!("  [{}]", dname) },
+                if dname.is_empty() {
+                    String::new()
+                } else {
+                    format!("  [{}]", dname)
+                },
             );
         }
 

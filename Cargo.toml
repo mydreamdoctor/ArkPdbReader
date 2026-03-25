@@ -24,6 +24,9 @@ anyhow = "1"
 # converting BStr (byte strings in PDB) to &str / String.
 bstr = "1"
 
+# Demangles MSVC-decorated public symbol names into readable display strings.
+msvc-demangler = "0.11"
+
 [profile.release]
 # Maximum optimisation - this runs against a very large PDB (multi-GB).
 opt-level = 3

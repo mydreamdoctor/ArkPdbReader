@@ -16,9 +16,9 @@ const char*    ark_pdb_last_error(const ArkPdbSession* session);
 
 ### Guarantees
 
-- `ark_pdb_open` reads the **TPI stream** and **Global Symbol Stream** entirely
-  into memory before returning. The underlying file handle is kept open but is
-  not needed for any subsequent query.
+- `ark_pdb_open` reads the **TPI stream**, **IPI stream**, and **Global Symbol
+  Stream** entirely into memory before returning. The underlying PDB handle is
+  dropped after open, so all later queries are in-memory.
 - On failure `ark_pdb_open` returns `NULL`; the reason is printed to `stderr`.
 - `ark_pdb_close(NULL)` is safe (no-op).
 - Result handles (`ArkLayoutHandle*`, `ArkFunctionListHandle*`) may outlive
@@ -58,6 +58,31 @@ The PDB may contain both a **forward declaration** (no field list) and a **full
 definition** of the same class. The name index always stores the full
 definition's TypeIndex. If only a forward declaration is present the class will
 appear in the index but `find_class_layout` will return null.
+
+---
+
+## 2a. Display-ready symbol enumeration
+
+```c
+bool ark_pdb_list_symbol_entries(
+    ArkPdbSession*,
+    bool include_global_functions,
+    bool include_public_symbols,
+    ArkSymbolEntryCallback,
+    void*);
+```
+
+### What is included
+
+- Named types from TPI: classes, structs, unions, and enums
+- Global function names from IPI when `include_global_functions` is true
+- Public symbol names from PSI/GSS when `include_public_symbols` is true
+
+### Notes
+
+- Public symbol names are demangled when possible before they are emitted.
+- Results are sorted by kind and then by name.
+- Duplicate `(name, kind)` pairs are removed before callbacks fire.
 
 ---
 

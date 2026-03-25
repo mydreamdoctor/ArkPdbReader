@@ -3,15 +3,15 @@
 > **License:** This project is source-available under a [custom non-commercial license](LICENSE). You may view, modify, and use it in open-source projects with attribution. Commercial use is not permitted.
 
 High-performance PDB reader for Unreal Engine game PDB files. Extracts class
-layouts, member functions, and symbol RVAs from PDB files that the LLVM and DIA
-backends struggle with.
+layouts, member functions, symbol RVAs, and display-ready symbol lists from PDB
+files that higher-level readers struggle with.
 
 ---
 
 ## What this is
 
 A Rust library that reads PDB files by parsing the **CodeView TPI stream**
-directly — the same raw data the Windows DIA SDK uses.
+directly, plus the IPI and public symbol streams needed for global symbol work.
 
 The library exposes a **C API** (`include/ark_pdb_reader.h`) and a **C++ RAII
 wrapper** (`include/ark_pdb_reader.hpp`) so it can be consumed from any C or
@@ -114,6 +114,12 @@ int main() {
         return true;
     });
 
+    // Enumerate a display-ready symbol list.
+    pdb.listSymbolEntries(true, true, [](const ark::SymbolEntryView& entry) {
+        std::cout << static_cast<int>(entry.kind) << ": " << entry.name << "\n";
+        return true;
+    });
+
     // Get class layout
     auto layout = pdb.getClassLayout("AGameModeBase");
     if (layout) {
@@ -154,6 +160,7 @@ walkthrough of adding ArkPdbReader to a C++ CMake project.
 
 **Extracted:**
 - All UE-style class and struct names (filterable by any caller)
+- Display-ready symbol entries built from type, ID, and public symbol streams
 - Direct base class name
 - Total struct size in bytes
 - All instance data members: name, C++ type name, byte offset, size

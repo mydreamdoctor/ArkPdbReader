@@ -1,5 +1,4 @@
 /// Resolves a CodeView TypeIndex to a human-readable C++ type name string.
-
 use ms_pdb::tpi::TypeStream;
 use ms_pdb::types::{TypeData, TypeIndex};
 

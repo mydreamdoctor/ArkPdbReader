@@ -101,9 +101,23 @@ enum class TypeKind {
     Struct = ARK_PDB_TYPE_KIND_STRUCT
 };
 
+enum class SymbolKind {
+    Class = ARK_PDB_SYMBOL_KIND_CLASS,
+    Struct = ARK_PDB_SYMBOL_KIND_STRUCT,
+    Union = ARK_PDB_SYMBOL_KIND_UNION,
+    Enum = ARK_PDB_SYMBOL_KIND_ENUM,
+    GlobalFunction = ARK_PDB_SYMBOL_KIND_GLOBAL_FUNCTION,
+    GlobalSymbol = ARK_PDB_SYMBOL_KIND_GLOBAL_SYMBOL
+};
+
 struct TypeEntryView {
     std::string name;
     TypeKind kind = TypeKind::Class;
+};
+
+struct SymbolEntryView {
+    std::string name;
+    SymbolKind kind = SymbolKind::Class;
 };
 
 /** One data member of a class. */
@@ -445,6 +459,38 @@ public:
         });
     }
 
+    /**
+     * Enumerate display-ready symbol entries.
+     *
+     * @param includeGlobalFunctions  Include global function names from IPI.
+     * @param includePublicSymbols    Include public symbol names from PSI/GSS.
+     * @param callback                Called with each entry in sorted order.
+     *                                Return true to continue, false to stop.
+     * @return                        true on success, false on error.
+     */
+    template <typename Fn>
+    bool listSymbolEntries(
+        bool includeGlobalFunctions,
+        bool includePublicSymbols,
+        Fn&& callback) const {
+        struct Ctx {
+            Fn* fn;
+        } ctx{ &callback };
+
+        return ark_pdb_list_symbol_entries(
+            session_,
+            includeGlobalFunctions,
+            includePublicSymbols,
+            [](const char* name, ArkPdbSymbolKind kind, void* ud) -> bool {
+                auto* c = static_cast<Ctx*>(ud);
+                return (*c->fn)(SymbolEntryView{
+                    std::string(name),
+                    static_cast<SymbolKind>(kind)
+                });
+            },
+            &ctx);
+    }
+
     // -- Type existence ----------------------------------------------------
 
     /**
@@ -467,6 +513,21 @@ public:
 
     bool typeExists(const std::string& name, std::string* resolved = nullptr) const {
         return typeExists(name.c_str(), resolved);
+    }
+
+    // -- Symbol lookup -----------------------------------------------------
+
+    bool findSymbolRva(const char* decoratedName, uint64_t* outRva = nullptr) const {
+        uint64_t localRva = 0;
+        const bool found = ark_pdb_find_symbol_rva(
+            session_,
+            decoratedName,
+            outRva ? outRva : &localRva);
+        return found;
+    }
+
+    bool findSymbolRva(const std::string& decoratedName, uint64_t* outRva = nullptr) const {
+        return findSymbolRva(decoratedName.c_str(), outRva);
     }
 
     // -- Class layout ------------------------------------------------------

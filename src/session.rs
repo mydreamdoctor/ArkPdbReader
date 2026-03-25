@@ -3,11 +3,11 @@ use std::collections::HashMap;
 use std::ffi::CString;
 use std::path::Path;
 
-use ms_pdb::Pdb;
 use ms_pdb::tpi::TypeStream;
+use ms_pdb::Pdb;
 
-use crate::type_index::{NameIndex, build_name_index};
-use crate::symbol_stream::{SymbolIndex, PubRvaIndex, build_symbol_index, build_pub_rva_index};
+use crate::symbol_stream::{build_pub_rva_index, build_symbol_index, PubRvaIndex, SymbolIndex};
+use crate::type_index::{build_name_index, NameIndex};
 use crate::types::{ClassLayout, FunctionInfo};
 
 /// Central state for an open PDB session.
@@ -18,6 +18,9 @@ use crate::types::{ClassLayout, FunctionInfo};
 pub struct Session {
     /// All TPI records in an owned buffer; the primary data source.
     pub type_stream: TypeStream<Vec<u8>>,
+
+    /// The IPI stream holds function IDs such as LF_FUNC_ID.
+    pub ipi_stream: TypeStream<Vec<u8>>,
 
     /// Raw bytes of the Global Symbol Stream for the decorated-name index.
     pub gss_data: Vec<u8>,
@@ -53,6 +56,7 @@ impl Session {
     pub fn open(path: &str) -> anyhow::Result<Self> {
         let pdb = Pdb::open(Path::new(path))?;
         let type_stream = pdb.read_type_stream()?;
+        let ipi_stream = pdb.read_ipi_stream()?;
         let gss_data = pdb.read_gss()?.stream_data;
 
         // Read section headers to enable segment:offset → RVA conversion.
@@ -66,6 +70,7 @@ impl Session {
 
         Ok(Session {
             type_stream,
+            ipi_stream,
             gss_data,
             section_vaddrs,
             name_index: OnceCell::new(),
@@ -79,12 +84,14 @@ impl Session {
 
     /// Access or initialise the name index.
     pub fn name_index(&self) -> &NameIndex {
-        self.name_index.get_or_init(|| build_name_index(&self.type_stream))
+        self.name_index
+            .get_or_init(|| build_name_index(&self.type_stream))
     }
 
     /// Access or initialise the symbol (decorated-name) index.
     pub fn symbol_index(&self) -> &SymbolIndex {
-        self.symbol_index.get_or_init(|| build_symbol_index(&self.gss_data))
+        self.symbol_index
+            .get_or_init(|| build_symbol_index(&self.gss_data))
     }
 
     /// Access or initialise the public-symbol RVA index.
@@ -95,7 +102,6 @@ impl Session {
 
     /// Store an error for retrieval via `ark_pdb_last_error`.
     pub fn set_error(&mut self, msg: &str) {
-        self.last_error_cstr = CString::new(msg)
-            .unwrap_or_else(|_| CString::new("error").unwrap());
+        self.last_error_cstr = CString::new(msg).unwrap_or_else(|_| CString::new("error").unwrap());
     }
 }

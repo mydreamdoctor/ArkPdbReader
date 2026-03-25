@@ -1,11 +1,10 @@
 /// Extracts class members and member functions from a TPI field list.
-
 use ms_pdb::tpi::TypeStream;
-use ms_pdb::types::{TypeData, TypeIndex, MethodList, fields::Field};
+use ms_pdb::types::{fields::Field, MethodList, TypeData, TypeIndex};
 
-use crate::type_name::{resolve_type_name, bstr_to_string};
-use crate::symbol_stream::{SymbolIndex, lookup_decorated_names};
-use crate::types::{ClassLayout, MemberInfo, FunctionInfo, ParamInfo};
+use crate::symbol_stream::{lookup_decorated_names, SymbolIndex};
+use crate::type_name::{bstr_to_string, resolve_type_name};
+use crate::types::{ClassLayout, FunctionInfo, MemberInfo, ParamInfo};
 
 /// Extract the full class layout (data members + base class) for a UDT.
 pub fn extract_class_layout(
@@ -35,11 +34,18 @@ pub fn extract_class_layout(
         match field {
             Field::Member(m) => {
                 let name = bstr_to_string(m.name);
-                if name.is_empty() { continue; }
+                if name.is_empty() {
+                    continue;
+                }
                 let type_name = resolve_type_name(type_stream, m.ty, 0);
                 let offset = i32::try_from(m.offset).unwrap_or(0);
                 let size = size_of_type(type_stream, m.ty);
-                layout.members.push(MemberInfo { name, type_name, offset, size });
+                layout.members.push(MemberInfo {
+                    name,
+                    type_name,
+                    offset,
+                    size,
+                });
             }
 
             Field::BaseClass(b) => {
@@ -95,16 +101,23 @@ pub fn extract_class_functions(
         match field {
             Field::OneMethod(m) => {
                 let name = bstr_to_string(m.name);
-                if should_skip_method(&name, class_name) { continue; }
-                if let Some(info) = resolve_method(type_stream, sym_index, class_name, &name, m.ty, m.attr) {
+                if should_skip_method(&name, class_name) {
+                    continue;
+                }
+                if let Some(info) =
+                    resolve_method(type_stream, sym_index, class_name, &name, m.ty, m.attr)
+                {
                     functions.push(info);
                 }
             }
 
             Field::Method(m) => {
                 let name = bstr_to_string(m.name);
-                if should_skip_method(&name, class_name) { continue; }
-                let infos = resolve_method_list(type_stream, sym_index, class_name, &name, m.methods);
+                if should_skip_method(&name, class_name) {
+                    continue;
+                }
+                let infos =
+                    resolve_method_list(type_stream, sym_index, class_name, &name, m.methods);
                 functions.extend(infos);
             }
 
@@ -118,16 +131,17 @@ pub fn extract_class_functions(
 // ── helpers ────────────────────────────────────────────────────────────────
 
 fn should_skip_method(name: &str, class_name: &str) -> bool {
-    name.is_empty()
-        || name.starts_with('~')
-        || name == class_name
-        || name.starts_with("operator")
+    name.is_empty() || name.starts_with('~') || name == class_name || name.starts_with("operator")
 }
 
 /// CV_fldattr_t mprop field (bits 4:2 of attr).
 /// 0=vanilla 1=virtual 2=static 3=friend 4=intro_virtual 5=pure 6=pure_intro
-fn attr_is_virtual(attr: u16) -> bool { matches!((attr >> 2) & 7, 1 | 4 | 5 | 6) }
-fn attr_is_static(attr: u16) -> bool  { (attr >> 2) & 7 == 2 }
+fn attr_is_virtual(attr: u16) -> bool {
+    matches!((attr >> 2) & 7, 1 | 4 | 5 | 6)
+}
+fn attr_is_static(attr: u16) -> bool {
+    (attr >> 2) & 7 == 2
+}
 
 fn resolve_method(
     type_stream: &TypeStream<Vec<u8>>,
@@ -187,7 +201,14 @@ fn resolve_method_list(
 
     let mut results = Vec::new();
     while let Ok(Some(item)) = ml.next() {
-        if let Some(info) = resolve_method(type_stream, sym_index, class_name, method_name, item.ty, item.attr) {
+        if let Some(info) = resolve_method(
+            type_stream,
+            sym_index,
+            class_name,
+            method_name,
+            item.ty,
+            item.attr,
+        ) {
             results.push(info);
         }
     }
@@ -195,7 +216,9 @@ fn resolve_method_list(
 }
 
 fn extract_params(type_stream: &TypeStream<Vec<u8>>, arg_list_ti: TypeIndex) -> Vec<ParamInfo> {
-    if arg_list_ti.0 < TypeIndex::MIN_BEGIN.0 { return Vec::new(); }
+    if arg_list_ti.0 < TypeIndex::MIN_BEGIN.0 {
+        return Vec::new();
+    }
 
     let record = match type_stream.record(arg_list_ti) {
         Ok(r) => r,
@@ -218,7 +241,9 @@ fn extract_params(type_stream: &TypeStream<Vec<u8>>, arg_list_ti: TypeIndex) -> 
 
 /// A const method has `this: LF_POINTER → LF_MODIFIER(const) → class_type`.
 fn inspect_this_const(type_stream: &TypeStream<Vec<u8>>, this_ti: TypeIndex) -> bool {
-    if this_ti.0 < TypeIndex::MIN_BEGIN.0 { return false; }
+    if this_ti.0 < TypeIndex::MIN_BEGIN.0 {
+        return false;
+    }
 
     let ptr_record = match type_stream.record(this_ti) {
         Ok(r) => r,
@@ -231,7 +256,9 @@ fn inspect_this_const(type_stream: &TypeStream<Vec<u8>>, this_ti: TypeIndex) -> 
     };
 
     let inner_ti = ptr.fixed.ty.get();
-    if inner_ti.0 < TypeIndex::MIN_BEGIN.0 { return false; }
+    if inner_ti.0 < TypeIndex::MIN_BEGIN.0 {
+        return false;
+    }
 
     let mod_record = match type_stream.record(inner_ti) {
         Ok(r) => r,
@@ -257,7 +284,7 @@ fn size_of_type(type_stream: &TypeStream<Vec<u8>>, ti: TypeIndex) -> u32 {
 
     match record.parse() {
         Ok(TypeData::Struct(s)) => u32::try_from(s.length).unwrap_or(0),
-        Ok(TypeData::Pointer(_)) => 8,  // x64
+        Ok(TypeData::Pointer(_)) => 8, // x64
         Ok(TypeData::Enum(_)) => 4,
         _ => 0,
     }
@@ -267,14 +294,16 @@ fn primitive_size(ti: u32) -> u32 {
     let mode = (ti >> 8) & 0xF;
     let base = ti & 0xFF;
 
-    if mode > 0 { return 8; } // pointer (x64)
+    if mode > 0 {
+        return 8;
+    } // pointer (x64)
 
     match base {
-        0x30 => 1,                                          // bool
-        0x10 | 0x20 | 0x60 | 0x61 | 0x68 | 0x69 => 1,    // char variants
-        0x11 | 0x21 | 0x71 => 2,                           // short, wchar_t
-        0x12 | 0x22 | 0x40 | 0x74 | 0x75 => 4,            // int, float
-        0x13 | 0x23 | 0x41 | 0x76 | 0x77 => 8,            // int64, double
+        0x30 => 1,                                    // bool
+        0x10 | 0x20 | 0x60 | 0x61 | 0x68 | 0x69 => 1, // char variants
+        0x11 | 0x21 | 0x71 => 2,                      // short, wchar_t
+        0x12 | 0x22 | 0x40 | 0x74 | 0x75 => 4,        // int, float
+        0x13 | 0x23 | 0x41 | 0x76 | 0x77 => 8,        // int64, double
         _ => 0,
     }
 }

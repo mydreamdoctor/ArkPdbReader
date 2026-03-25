@@ -127,6 +127,15 @@ typedef enum ArkPdbTypeKind {
     ARK_PDB_TYPE_KIND_STRUCT = 2
 } ArkPdbTypeKind;
 
+typedef enum ArkPdbSymbolKind {
+    ARK_PDB_SYMBOL_KIND_CLASS = 1,
+    ARK_PDB_SYMBOL_KIND_STRUCT = 2,
+    ARK_PDB_SYMBOL_KIND_UNION = 3,
+    ARK_PDB_SYMBOL_KIND_ENUM = 4,
+    ARK_PDB_SYMBOL_KIND_GLOBAL_FUNCTION = 5,
+    ARK_PDB_SYMBOL_KIND_GLOBAL_SYMBOL = 6
+} ArkPdbSymbolKind;
+
 /* -------------------------------------------------------------------------- */
 /* Session lifecycle                                                          */
 /* -------------------------------------------------------------------------- */
@@ -188,6 +197,16 @@ typedef bool (*ArkClassNameCallback)(const char* name, void* user_data);
 typedef bool (*ArkTypeEntryCallback)(const char* name, ArkPdbTypeKind kind, void* user_data);
 
 /**
+ * Callback type for ark_pdb_list_symbol_entries.
+ *
+ * @param name       Null-terminated UTF-8 display name.
+ * @param kind       Symbol category for the emitted entry.
+ * @param user_data  The pointer passed to ark_pdb_list_symbol_entries.
+ * @return           true to continue enumeration, false to stop early.
+ */
+typedef bool (*ArkSymbolEntryCallback)(const char* name, ArkPdbSymbolKind kind, void* user_data);
+
+/**
  * Enumerate all Unreal Engine–style class and struct names from the PDB.
  *
  * Only names matching the UE top-level class pattern are included:
@@ -224,6 +243,27 @@ bool ark_pdb_list_type_entries(
     ArkPdbSession*       session,
     ArkTypeEntryCallback callback,
     void*                user_data);
+
+/**
+ * Enumerate display-ready symbol entries collected from the type, ID, and
+ * public-symbol streams.
+ *
+ * Types and enums are always included. Global functions and public symbols are
+ * included only when explicitly requested.
+ *
+ * @param session                   Open session handle.
+ * @param include_global_functions  Include global function names from IPI.
+ * @param include_public_symbols    Include public symbol names from PSI/GSS.
+ * @param callback                  Called once per symbol entry.
+ * @param user_data                 Forwarded to every callback invocation.
+ * @return                          true on success, false on error.
+ */
+bool ark_pdb_list_symbol_entries(
+    ArkPdbSession*        session,
+    bool                  include_global_functions,
+    bool                  include_public_symbols,
+    ArkSymbolEntryCallback callback,
+    void*                 user_data);
 
 /* -------------------------------------------------------------------------- */
 /* Symbol RVA lookup                                                          */

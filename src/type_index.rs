@@ -1,10 +1,9 @@
+use ms_pdb::tpi::TypeStream;
+use ms_pdb::types::{Leaf, TypeData, TypeIndex};
 /// Builds a name-to-TypeIndex lookup index from the TPI stream.
 ///
 /// One sequential TPI pass on first use; all subsequent lookups are O(1).
-
 use std::collections::HashMap;
-use ms_pdb::tpi::TypeStream;
-use ms_pdb::types::{Leaf, TypeData, TypeIndex};
 
 use crate::type_name::bstr_to_string;
 
@@ -73,11 +72,19 @@ pub fn build_name_index(type_stream: &TypeStream<Vec<u8>>) -> NameIndex {
         // Full definitions always win over forward references.
         match index.get(&key) {
             Some(e) if !e.is_forward_ref => continue, // already have full def
-            Some(_) if is_fwd => continue,             // both fwd, keep first
+            Some(_) if is_fwd => continue,            // both fwd, keep first
             _ => {}
         }
 
-        index.insert(key, NameEntry { type_index: ti, canonical_name: name, kind, is_forward_ref: is_fwd });
+        index.insert(
+            key,
+            NameEntry {
+                type_index: ti,
+                canonical_name: name,
+                kind,
+                is_forward_ref: is_fwd,
+            },
+        );
     }
 
     index
@@ -97,9 +104,19 @@ pub fn lookup_name<'a>(index: &'a NameIndex, name: &str) -> Option<&'a NameEntry
 /// no namespaces.
 pub fn is_ue_top_level_class(name: &str) -> bool {
     let mut chars = name.chars();
-    let prefix = match chars.next() { Some(c) => c, None => return false };
-    let second = match chars.next() { Some(c) => c, None => return false };
-    if !matches!(prefix, 'A' | 'U' | 'F' | 'E' | 'T' | 'I') { return false; }
-    if !second.is_ascii_uppercase() { return false; }
+    let prefix = match chars.next() {
+        Some(c) => c,
+        None => return false,
+    };
+    let second = match chars.next() {
+        Some(c) => c,
+        None => return false,
+    };
+    if !matches!(prefix, 'A' | 'U' | 'F' | 'E' | 'T' | 'I') {
+        return false;
+    }
+    if !second.is_ascii_uppercase() {
+        return false;
+    }
     !name.contains('<') && !name.contains("::")
 }
