@@ -44,6 +44,8 @@
  *   }
  *
  *   // Get member functions.
+ *   // The first call may do a one-time lazy module-symbol scan to improve
+ *   // parameter names. That work is cached and does not affect findSymbolRva().
  *   ark::ClassFunctionList fns = pdb.getClassFunctions("AGameModeBase");
  *   if (fns) {
  *       for (const auto& f : fns.functions()) {
@@ -549,6 +551,9 @@ public:
 
     /**
      * Find all member functions of a named class or struct.
+     *
+     * The first call may trigger a one-time lazy module-symbol scan to recover
+     * better parameter names. That cache does not affect open-time symbol RVA lookup.
      *
      * @return  ClassFunctionList RAII wrapper (check operator bool()).
      */

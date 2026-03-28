@@ -57,11 +57,7 @@ pub fn build_symbol_index(gss_data: &[u8]) -> SymbolIndex {
 
         // Parse "?MethodName@ClassName@@..." to extract class and method.
         if let Some((class_name, method_name)) = parse_msvc_mangled_owner(&decorated) {
-            let key = format!(
-                "{}::{}",
-                class_name.to_lowercase(),
-                method_name.to_lowercase()
-            );
+            let key = owner_lookup_key(class_name, method_name);
             index.entry(key).or_default().push(decorated.to_owned());
         }
     }
@@ -83,7 +79,7 @@ pub fn build_symbol_index(gss_data: &[u8]) -> SymbolIndex {
 ///     component (innermost class).
 ///
 /// Returns `None` for global functions or names that don't match the pattern.
-fn parse_msvc_mangled_owner(mangled: &str) -> Option<(&str, &str)> {
+pub(crate) fn parse_msvc_mangled_owner(mangled: &str) -> Option<(&str, &str)> {
     // Must start with ?
     let rest = mangled.strip_prefix('?')?;
 
@@ -107,6 +103,14 @@ fn parse_msvc_mangled_owner(mangled: &str) -> Option<(&str, &str)> {
     Some((class_name, method_name))
 }
 
+pub(crate) fn owner_lookup_key(class_name: &str, method_name: &str) -> String {
+    format!(
+        "{}::{}",
+        class_name.to_lowercase(),
+        method_name.to_lowercase()
+    )
+}
+
 /// Look up all decorated names for a given class and method name.
 /// Returns an empty slice if nothing is found.
 pub fn lookup_decorated_names<'a>(
@@ -114,11 +118,7 @@ pub fn lookup_decorated_names<'a>(
     class_name: &str,
     method_name: &str,
 ) -> &'a [String] {
-    let key = format!(
-        "{}::{}",
-        class_name.to_lowercase(),
-        method_name.to_lowercase()
-    );
+    let key = owner_lookup_key(class_name, method_name);
     index.get(&key).map(Vec::as_slice).unwrap_or(&[])
 }
 

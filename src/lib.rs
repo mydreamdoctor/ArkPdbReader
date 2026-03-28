@@ -25,6 +25,7 @@
 /// All `const char*` parameters must be valid non-null null-terminated
 /// UTF-8 C strings for the duration of the call.
 mod field_list;
+mod proc_params;
 mod session;
 mod symbol_catalog;
 mod symbol_stream;
@@ -93,6 +94,8 @@ impl From<symbol_catalog::SymbolEntryKind> for ArkPdbSymbolKind {
 ///
 /// Reads the TPI stream and Global Symbol Stream into memory on open.
 /// All subsequent queries use only in-memory data.
+/// Module symbol streams are intentionally not scanned here; parameter-name
+/// enrichment reopens them lazily on the first class-function query only.
 ///
 /// Returns null on failure; use stderr output for diagnostics (the session
 /// does not exist yet, so there is no error handle).
@@ -466,8 +469,14 @@ pub extern "C" fn ark_pdb_find_class_functions(
 
         let type_idx = type_index::lookup_name(s.name_index(), name_str)?.type_index;
         let sym_index = s.symbol_index();
-        let funcs =
-            field_list::extract_class_functions(&s.type_stream, sym_index, name_str, type_idx);
+        let proc_param_index = s.proc_param_index();
+        let funcs = field_list::extract_class_functions(
+            &s.type_stream,
+            sym_index,
+            proc_param_index,
+            name_str,
+            type_idx,
+        );
         s.function_cache.insert(name_str.to_owned(), funcs.clone());
         Some(funcs)
     });

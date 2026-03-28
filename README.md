@@ -27,9 +27,14 @@ cannot reliably walk `LF_FIELDLIST` records in large game PDBs.  The result is
 
 The TPI stream is a flat packed array of CodeView type records.  One sequential
 pass (O(N) ≈ 1–3 s for the full Ark PDB) builds a complete
-`name → TypeIndex` hash map.  Every subsequent lookup is O(1).  Member and
+`name → TypeIndex` hash map. Every subsequent lookup is O(1). Member and
 function extraction for any class is then a single O(F) pass over its field
-list — no repeated scans.
+list — no repeated scans on the startup RVA path.
+
+Parameter names use a second, lazy path. The first class-function query can
+reopen the PDB once to scan module symbol streams for `S_LOCAL` parameter
+records, then that result is cached for the rest of the session. `ark_pdb_open`
+and symbol RVA lookup still avoid that work.
 
 ---
 
@@ -166,10 +171,11 @@ walkthrough of adding ArkPdbReader to a C++ CMake project.
 - All instance data members: name, C++ type name, byte offset, size
 - All member functions: short name, decorated name, return type, parameters
   (name + type), `isVirtual`, `isStatic`, `isConst` flags
+- Best-effort per-parameter names from module symbols when the PDB exposes them
 
 **Not extracted (current version):**
 - Static data members (no instance offset)
 - Operator overloads and constructors/destructors (intentionally excluded)
 - Full template argument expansion (template names are included verbatim)
-- Per-parameter names from PDB (parameter names are `param0`, `param1`, ...
-  since large game PDBs do not reliably store them)
+- Guaranteed real parameter names for every function. When the module symbols
+  do not expose names, ArkPdbReader still falls back to positional `paramN`.

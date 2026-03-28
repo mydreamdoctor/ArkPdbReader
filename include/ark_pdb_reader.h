@@ -143,8 +143,10 @@ typedef enum ArkPdbSymbolKind {
 /**
  * Open a PDB file.
  *
- * Reads the TPI stream and Global Symbol Stream into memory.
- * This is the only I/O-heavy operation; all subsequent queries are in-memory.
+ * Reads the TPI, IPI, and Global Symbol streams into memory.
+ * This keeps type, layout, and RVA queries in-memory after open.
+ * Module symbol streams are not scanned here; that slower parameter-name
+ * enrichment path is deferred until the first class-function query.
  *
  * @param path  UTF-8 null-terminated path to the .pdb file.
  * @return      Session handle on success, NULL on failure.
@@ -402,6 +404,10 @@ uint32_t ark_pdb_layout_get_member_size(
  * Building the symbol index (for decorated-name resolution) takes O(N) in
  * the number of public symbols on the first call.
  *
+ * ArkPdbReader may also perform a one-time lazy module-symbol scan here to
+ * recover better parameter names. That extra work is cached per session and
+ * does not affect ark_pdb_open or ark_pdb_find_symbol_rva.
+ *
  * @param session     Open session handle.
  * @param class_name  Class or struct name (case-insensitive, null-terminated).
  * @return            Function list handle on success, NULL on error.
@@ -478,7 +484,8 @@ int32_t ark_pdb_funclist_get_param_count(
 
 /**
  * Write the name of parameter param_index of function func_index into buf.
- * PDB parameter names are often absent; "paramN" is used as a fallback.
+ * ArkPdbReader first tries to recover names from module symbols. If the PDB
+ * does not expose a better name, positional "paramN" is used as a fallback.
  */
 void ark_pdb_funclist_get_param_name(
     const ArkFunctionListHandle* handle,

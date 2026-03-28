@@ -18,7 +18,11 @@ const char*    ark_pdb_last_error(const ArkPdbSession* session);
 
 - `ark_pdb_open` reads the **TPI stream**, **IPI stream**, and **Global Symbol
   Stream** entirely into memory before returning. The underlying PDB handle is
-  dropped after open, so all later queries are in-memory.
+  dropped after open, so later layout, type, and RVA queries stay in-memory.
+- `ark_pdb_open` does **not** scan DBI module symbol streams. That slower
+  parameter-name enrichment path is deferred until the first
+  `ark_pdb_find_class_functions` call, and only if function metadata is
+  requested.
 - On failure `ark_pdb_open` returns `NULL`; the reason is printed to `stderr`.
 - `ark_pdb_close(NULL)` is safe (no-op).
 - Result handles (`ArkLayoutHandle*`, `ArkFunctionListHandle*`) may outlive
@@ -137,7 +141,7 @@ void                   ark_pdb_funclist_free(ArkFunctionListHandle*);
 | `name` | Short function name from `LF_ONEMETHOD.name` / `LF_METHOD.name` |
 | `decorated_name` | Matched from the public symbol table (PSI) by class+method name |
 | `return_type` | `LF_MFUNCTION.return_value` → type name resolved |
-| `params` | `LF_MFUNCTION.arg_list` → `LF_ARGLIST` → each TypeIndex resolved |
+| `params` | Types from `LF_MFUNCTION.arg_list` plus best-effort names from module `S_LOCAL` / `S_REGREL32` symbols |
 | `is_static` | `LF_ONEMETHOD.attr` method-property bits == static (2) |
 | `is_virtual` | method-property bits == virtual (1), intro-virtual (4), pure (5,6) |
 | `is_const` | `LF_MFUNCTION.this` pointer's pointee has `LF_MODIFIER` const bit |
@@ -157,14 +161,21 @@ parse of the `?MethodName@ClassName@@...` pattern — **no full demangler is
 used**.
 
 When multiple overloads exist (same class + method name), all decorated names
-are stored. The `get_decorated_name` accessor returns the **first** match.
-This may be incorrect for overloaded methods; the generator is expected to
-disambiguate using the full signature when needed.
+are stored. ArkPdbReader now prefers the candidate whose recovered module-symbol
+signature best matches the TPI parameter list. If no stronger match exists, it
+still falls back to the first public-symbol candidate.
 
 ### Symbol index build cost
 
 One sequential pass over the Global Symbol Stream on the first
 `find_class_functions` call. Subsequent calls use the cached index.
+
+### Parameter-name enrichment cost
+
+The first `find_class_functions` call can also trigger a one-time DBI module
+symbol scan to recover parameter names. That cache is separate from
+`ark_pdb_open` and `ark_pdb_find_symbol_rva`, so startup offset lookup does not
+pay this cost.
 
 ---
 
@@ -242,12 +253,14 @@ is needed.
 
 ## 9. Known limitations
 
-1. **Decorated name overloads**: when a class has multiple overloaded methods
-   with the same name, only the first matching decorated name is returned.
+1. **Decorated name overloads**: overloads are matched by best-effort type and
+   arity alignment, but some ambiguous cases can still fall back to the first
+   public-symbol candidate.
 2. **Template members**: template instantiation members are present but type
    names for template arguments may be verbose.
 3. **Anonymous structs/unions**: unnamed members (e.g. anonymous union fields)
    will have empty names.
-4. **Module symbol streams**: DBI per-module symbol streams are not read.
-   Decorated names come from the PSI (public symbol table) only. Private
-   symbols not in the PSI will have an empty `decorated_name`.
+4. **Module symbol streams**: DBI per-module symbol streams are read only
+   during lazy function enrichment. Decorated names still come from the PSI
+   (public symbol table), so private symbols not in the PSI still have an
+   empty `decorated_name` even if their parameter names were recovered.

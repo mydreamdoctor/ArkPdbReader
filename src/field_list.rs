@@ -2,6 +2,7 @@
 use ms_pdb::tpi::TypeStream;
 use ms_pdb::types::{fields::Field, MethodList, TypeData, TypeIndex};
 
+use crate::proc_params::{choose_best_owner_match, choose_best_public_match, ProcParamIndex};
 use crate::symbol_stream::{lookup_decorated_names, SymbolIndex};
 use crate::type_name::{bstr_to_string, resolve_type_name};
 use crate::types::{ClassLayout, FunctionInfo, MemberInfo, ParamInfo};
@@ -77,6 +78,7 @@ pub fn extract_class_layout(
 pub fn extract_class_functions(
     type_stream: &TypeStream<Vec<u8>>,
     sym_index: &SymbolIndex,
+    proc_param_index: &ProcParamIndex,
     class_name: &str,
     type_index: TypeIndex,
 ) -> Vec<FunctionInfo> {
@@ -104,9 +106,15 @@ pub fn extract_class_functions(
                 if should_skip_method(&name, class_name) {
                     continue;
                 }
-                if let Some(info) =
-                    resolve_method(type_stream, sym_index, class_name, &name, m.ty, m.attr)
-                {
+                if let Some(info) = resolve_method(
+                    type_stream,
+                    sym_index,
+                    proc_param_index,
+                    class_name,
+                    &name,
+                    m.ty,
+                    m.attr,
+                ) {
                     functions.push(info);
                 }
             }
@@ -116,8 +124,14 @@ pub fn extract_class_functions(
                 if should_skip_method(&name, class_name) {
                     continue;
                 }
-                let infos =
-                    resolve_method_list(type_stream, sym_index, class_name, &name, m.methods);
+                let infos = resolve_method_list(
+                    type_stream,
+                    sym_index,
+                    proc_param_index,
+                    class_name,
+                    &name,
+                    m.methods,
+                );
                 functions.extend(infos);
             }
 
@@ -146,6 +160,7 @@ fn attr_is_static(attr: u16) -> bool {
 fn resolve_method(
     type_stream: &TypeStream<Vec<u8>>,
     sym_index: &SymbolIndex,
+    proc_param_index: &ProcParamIndex,
     class_name: &str,
     method_name: &str,
     method_ti: TypeIndex,
@@ -160,11 +175,22 @@ fn resolve_method(
     };
 
     let return_type = resolve_type_name(type_stream, mf.return_value.get(), 0);
-    let params = extract_params(type_stream, mf.arg_list.get());
+    let mut params = extract_params(type_stream, mf.arg_list.get());
     let is_const = inspect_this_const(type_stream, mf.this.get());
 
     let decorated_names = lookup_decorated_names(sym_index, class_name, method_name);
-    let decorated_name = decorated_names.first().cloned().unwrap_or_default();
+    let mut decorated_name = decorated_names.first().cloned().unwrap_or_default();
+
+    if let Some((matched_decorated_name, param_names)) =
+        choose_best_public_match(&params, decorated_names, proc_param_index)
+    {
+        decorated_name = matched_decorated_name;
+        apply_param_names(&mut params, &param_names);
+    } else if let Some(param_names) =
+        choose_best_owner_match(&params, class_name, method_name, proc_param_index)
+    {
+        apply_param_names(&mut params, &param_names);
+    }
 
     Some(FunctionInfo {
         name: method_name.to_owned(),
@@ -180,6 +206,7 @@ fn resolve_method(
 fn resolve_method_list(
     type_stream: &TypeStream<Vec<u8>>,
     sym_index: &SymbolIndex,
+    proc_param_index: &ProcParamIndex,
     class_name: &str,
     method_name: &str,
     method_list_ti: TypeIndex,
@@ -204,6 +231,7 @@ fn resolve_method_list(
         if let Some(info) = resolve_method(
             type_stream,
             sym_index,
+            proc_param_index,
             class_name,
             method_name,
             item.ty,
@@ -237,6 +265,14 @@ fn extract_params(type_stream: &TypeStream<Vec<u8>>, arg_list_ti: TypeIndex) -> 
             type_name: resolve_type_name(type_stream, ti_le.get(), 0),
         })
         .collect()
+}
+
+fn apply_param_names(params: &mut [ParamInfo], param_names: &[String]) {
+    for (param, param_name) in params.iter_mut().zip(param_names.iter()) {
+        if !param_name.is_empty() {
+            param.name = param_name.clone();
+        }
+    }
 }
 
 /// A const method has `this: LF_POINTER → LF_MODIFIER(const) → class_type`.

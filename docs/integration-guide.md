@@ -6,6 +6,12 @@ ArkPdbReader is a Rust library with a C API and C++ RAII wrapper. Your project
 links against the pre-built shared or static library and includes the provided
 headers. No Rust knowledge is needed beyond running `cargo build`.
 
+Important performance detail: `ark_pdb_open` still loads only the shared TPI,
+IPI, and public symbol data needed for fast layout, type, and RVA work. The
+reader now does a separate one-time module symbol scan only when
+`getClassFunctions` / `ark_pdb_find_class_functions` is called and parameter
+name enrichment is needed.
+
 ---
 
 ## 1. Prerequisites
@@ -107,11 +113,17 @@ int main() {
     auto fns = pdb.getClassFunctions("ACharacter");
     if (fns) {
         for (int i = 0; i < fns.count(); i++) {
-            char name[256], ret[512];
+            char name[256], ret[512], paramName[256], paramType[512];
             fns.getName(i, name, sizeof(name));
             fns.getReturnType(i, ret, sizeof(ret));
-            std::cout << ret << " " << name << "("
-                      << fns.paramCount(i) << " params)"
+            std::cout << ret << " " << name << "(";
+            for (int p = 0; p < fns.paramCount(i); ++p) {
+                if (p > 0) std::cout << ", ";
+                fns.getParamName(i, p, paramName, sizeof(paramName));
+                fns.getParamType(i, p, paramType, sizeof(paramType));
+                std::cout << paramType << " " << paramName;
+            }
+            std::cout << ")"
                       << (fns.isVirtual(i) ? " virtual" : "")
                       << (fns.isStatic(i) ? " static" : "")
                       << (fns.isConst(i) ? " const" : "")
@@ -155,6 +167,10 @@ int main() {
 
 See [`api-contract.md`](api-contract.md) for the complete behaviour contract
 covering all functions, buffer sizes, error handling, and thread safety.
+
+If your application has a hot startup path that only needs symbol RVAs, keep
+using `findSymbolRva` directly. The lazy parameter-name scan is fenced behind
+the class-function APIs and does not run during open or RVA lookup.
 
 ---
 

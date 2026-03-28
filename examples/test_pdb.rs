@@ -11,12 +11,12 @@ use ark_pdb_reader::{
     ark_pdb_close, ark_pdb_find_class_functions, ark_pdb_find_class_layout,
     ark_pdb_find_symbol_rva, ark_pdb_funclist_free, ark_pdb_funclist_get_count,
     ark_pdb_funclist_get_decorated_name, ark_pdb_funclist_get_name,
-    ark_pdb_funclist_get_param_count, ark_pdb_funclist_get_param_type,
-    ark_pdb_funclist_get_return_type, ark_pdb_funclist_is_const, ark_pdb_funclist_is_static,
-    ark_pdb_funclist_is_virtual, ark_pdb_layout_free, ark_pdb_layout_get_base_class,
-    ark_pdb_layout_get_member_count, ark_pdb_layout_get_member_name,
+    ark_pdb_funclist_get_param_count, ark_pdb_funclist_get_param_name,
+    ark_pdb_funclist_get_param_type, ark_pdb_funclist_get_return_type, ark_pdb_funclist_is_const,
+    ark_pdb_funclist_is_static, ark_pdb_funclist_is_virtual, ark_pdb_layout_free,
+    ark_pdb_layout_get_base_class, ark_pdb_layout_get_member_count, ark_pdb_layout_get_member_name,
     ark_pdb_layout_get_member_offset, ark_pdb_layout_get_member_type,
-    ark_pdb_layout_get_total_size, ark_pdb_list_class_names, ark_pdb_open, ArkClassNameCallback,
+    ark_pdb_layout_get_total_size, ark_pdb_list_class_names, ark_pdb_open,
 };
 
 fn cstr(s: &str) -> CString {
@@ -40,7 +40,7 @@ fn main() {
     println!("Opening PDB: {}", args[1]);
     let t0 = std::time::Instant::now();
 
-    let session = unsafe { ark_pdb_open(pdb_path.as_ptr()) };
+    let session = ark_pdb_open(pdb_path.as_ptr());
     if session.is_null() {
         eprintln!("ark_pdb_open failed");
         std::process::exit(1);
@@ -64,13 +64,11 @@ fn main() {
         true
     }
 
-    unsafe {
-        ark_pdb_list_class_names(
-            session,
-            collect_name,
-            &mut class_names as *mut Vec<String> as *mut std::ffi::c_void,
-        );
-    }
+    ark_pdb_list_class_names(
+        session,
+        collect_name,
+        &mut class_names as *mut Vec<String> as *mut std::ffi::c_void,
+    );
 
     println!(
         "Enumerated {} UE classes in {:.2}s",
@@ -87,7 +85,7 @@ fn main() {
             println!("  ...");
         }
 
-        unsafe { ark_pdb_close(session) };
+        ark_pdb_close(session);
         return;
     }
 
@@ -97,16 +95,16 @@ fn main() {
 
     println!("\n── Layout of '{}' ──", class_name);
     let t2 = std::time::Instant::now();
-    let layout = unsafe { ark_pdb_find_class_layout(session, class_cstr.as_ptr()) };
+    let layout = ark_pdb_find_class_layout(session, class_cstr.as_ptr());
 
     if layout.is_null() {
         println!("No layout found");
     } else {
         let mut base_buf = [0u8; 512];
-        unsafe { ark_pdb_layout_get_base_class(layout, base_buf.as_mut_ptr() as *mut c_char, 512) };
+        ark_pdb_layout_get_base_class(layout, base_buf.as_mut_ptr() as *mut c_char, 512);
         let base = read_buf(&base_buf);
-        let size = unsafe { ark_pdb_layout_get_total_size(layout) };
-        let count = unsafe { ark_pdb_layout_get_member_count(layout) };
+        let size = ark_pdb_layout_get_total_size(layout);
+        let count = ark_pdb_layout_get_member_count(layout);
 
         println!(
             "size={} bytes  base={}  members={}  ({}ms)",
@@ -119,11 +117,9 @@ fn main() {
         let mut nbuf = [0u8; 256];
         let mut tbuf = [0u8; 512];
         for i in 0..count {
-            unsafe {
-                ark_pdb_layout_get_member_name(layout, i, nbuf.as_mut_ptr() as *mut c_char, 256);
-                ark_pdb_layout_get_member_type(layout, i, tbuf.as_mut_ptr() as *mut c_char, 512);
-            }
-            let offset = unsafe { ark_pdb_layout_get_member_offset(layout, i) };
+            ark_pdb_layout_get_member_name(layout, i, nbuf.as_mut_ptr() as *mut c_char, 256);
+            ark_pdb_layout_get_member_type(layout, i, tbuf.as_mut_ptr() as *mut c_char, 512);
+            let offset = ark_pdb_layout_get_member_offset(layout, i);
             println!(
                 "  +{:5}  {:40}  {}",
                 offset,
@@ -132,51 +128,50 @@ fn main() {
             );
         }
 
-        unsafe { ark_pdb_layout_free(layout) };
+        ark_pdb_layout_free(layout);
     }
 
     println!("\n── Functions of '{}' ──", class_name);
     let t3 = std::time::Instant::now();
-    let funcs = unsafe { ark_pdb_find_class_functions(session, class_cstr.as_ptr()) };
+    let funcs = ark_pdb_find_class_functions(session, class_cstr.as_ptr());
 
     if funcs.is_null() {
         println!("No functions found (or class not found)");
     } else {
-        let count = unsafe { ark_pdb_funclist_get_count(funcs) };
+        let count = ark_pdb_funclist_get_count(funcs);
         println!("{} functions  ({}ms)", count, t3.elapsed().as_millis());
 
         let mut nbuf = [0u8; 256];
         let mut rbuf = [0u8; 512];
-        let mut pbuf = [0u8; 512];
+        let mut pnbuf = [0u8; 256];
+        let mut ptbuf = [0u8; 512];
         let mut dbuf = [0u8; 512];
         for i in 0..count {
-            unsafe {
-                ark_pdb_funclist_get_name(funcs, i, nbuf.as_mut_ptr() as *mut c_char, 256);
-                ark_pdb_funclist_get_return_type(funcs, i, rbuf.as_mut_ptr() as *mut c_char, 512);
-                ark_pdb_funclist_get_decorated_name(
+            ark_pdb_funclist_get_name(funcs, i, nbuf.as_mut_ptr() as *mut c_char, 256);
+            ark_pdb_funclist_get_return_type(funcs, i, rbuf.as_mut_ptr() as *mut c_char, 512);
+            ark_pdb_funclist_get_decorated_name(funcs, i, dbuf.as_mut_ptr() as *mut c_char, 512);
+            let is_v = ark_pdb_funclist_is_virtual(funcs, i);
+            let is_s = ark_pdb_funclist_is_static(funcs, i);
+            let is_c = ark_pdb_funclist_is_const(funcs, i);
+            let nparams = ark_pdb_funclist_get_param_count(funcs, i);
+
+            let mut param_pairs: Vec<String> = Vec::new();
+            for j in 0..nparams {
+                ark_pdb_funclist_get_param_name(
                     funcs,
                     i,
-                    dbuf.as_mut_ptr() as *mut c_char,
+                    j,
+                    pnbuf.as_mut_ptr() as *mut c_char,
+                    256,
+                );
+                ark_pdb_funclist_get_param_type(
+                    funcs,
+                    i,
+                    j,
+                    ptbuf.as_mut_ptr() as *mut c_char,
                     512,
                 );
-            }
-            let is_v = unsafe { ark_pdb_funclist_is_virtual(funcs, i) };
-            let is_s = unsafe { ark_pdb_funclist_is_static(funcs, i) };
-            let is_c = unsafe { ark_pdb_funclist_is_const(funcs, i) };
-            let nparams = unsafe { ark_pdb_funclist_get_param_count(funcs, i) };
-
-            let mut param_types: Vec<String> = Vec::new();
-            for j in 0..nparams {
-                unsafe {
-                    ark_pdb_funclist_get_param_type(
-                        funcs,
-                        i,
-                        j,
-                        pbuf.as_mut_ptr() as *mut c_char,
-                        512,
-                    )
-                };
-                param_types.push(read_buf(&pbuf));
+                param_pairs.push(format!("{} {}", read_buf(&ptbuf), read_buf(&pnbuf)));
             }
 
             let flags = format!(
@@ -190,7 +185,7 @@ fn main() {
                 "  [{}] {} {}({}) -> {}{}",
                 flags,
                 read_buf(&nbuf),
-                param_types.join(", "),
+                param_pairs.join(", "),
                 "",
                 read_buf(&rbuf),
                 if dname.is_empty() {
@@ -201,7 +196,7 @@ fn main() {
             );
         }
 
-        unsafe { ark_pdb_funclist_free(funcs) };
+        ark_pdb_funclist_free(funcs);
     }
 
     // ── Symbol RVA lookup (test with the first decorated name we know) ──────
@@ -209,7 +204,7 @@ fn main() {
         println!("\n── RVA of '{}' ──", rva_query);
         let sym_cstr = cstr(rva_query);
         let mut rva: u64 = 0;
-        let found = unsafe { ark_pdb_find_symbol_rva(session, sym_cstr.as_ptr(), &mut rva) };
+        let found = ark_pdb_find_symbol_rva(session, sym_cstr.as_ptr(), &mut rva);
         if found {
             println!("  RVA = 0x{:016x}", rva);
         } else {
@@ -217,6 +212,6 @@ fn main() {
         }
     }
 
-    unsafe { ark_pdb_close(session) };
+    ark_pdb_close(session);
     println!("\nTotal: {:.2}s", t0.elapsed().as_secs_f64());
 }

@@ -6,6 +6,7 @@ use std::path::Path;
 use ms_pdb::tpi::TypeStream;
 use ms_pdb::Pdb;
 
+use crate::proc_params::{build_proc_param_index, ProcParamIndex};
 use crate::symbol_stream::{build_pub_rva_index, build_symbol_index, PubRvaIndex, SymbolIndex};
 use crate::type_index::{build_name_index, NameIndex};
 use crate::types::{ClassLayout, FunctionInfo};
@@ -14,8 +15,13 @@ use crate::types::{ClassLayout, FunctionInfo};
 ///
 /// All fields are `pub` so the FFI functions in `lib.rs` can access them
 /// directly.  All data is stored in owned `Vec<u8>` / `String` types —
-/// the underlying `Pdb` file handle is dropped after `open()`.
+/// the underlying `Pdb` file handle is dropped after `open()`. The original
+/// path is retained so slower module-symbol enrichment can reopen the file
+/// lazily only when class-function metadata needs it.
 pub struct Session {
+    /// Original UTF-8 PDB path used to reopen module streams lazily.
+    pub pdb_path: String,
+
     /// All TPI records in an owned buffer; the primary data source.
     pub type_stream: TypeStream<Vec<u8>>,
 
@@ -37,6 +43,10 @@ pub struct Session {
 
     /// exact decorated name → RVA; built lazily on first use.
     pub pub_rva_index: OnceCell<PubRvaIndex>,
+
+    /// Procedure parameter-name index built lazily from module symbol streams.
+    /// This is intentionally separate from `open()` so startup RVA lookups stay fast.
+    pub proc_param_index: OnceCell<ProcParamIndex>,
 
     /// Per-class layout cache (exact-case key).
     pub layout_cache: HashMap<String, ClassLayout>,
@@ -69,6 +79,7 @@ impl Session {
             .collect();
 
         Ok(Session {
+            pdb_path: path.to_owned(),
             type_stream,
             ipi_stream,
             gss_data,
@@ -76,6 +87,7 @@ impl Session {
             name_index: OnceCell::new(),
             symbol_index: OnceCell::new(),
             pub_rva_index: OnceCell::new(),
+            proc_param_index: OnceCell::new(),
             layout_cache: HashMap::new(),
             function_cache: HashMap::new(),
             last_error_cstr: CString::new("").unwrap(),
@@ -98,6 +110,18 @@ impl Session {
     pub fn pub_rva_index(&self) -> &PubRvaIndex {
         self.pub_rva_index
             .get_or_init(|| build_pub_rva_index(&self.gss_data, &self.section_vaddrs))
+    }
+
+    /// Access or initialise the module-symbol parameter-name index.
+    pub fn proc_param_index(&self) -> &ProcParamIndex {
+        self.proc_param_index
+            .get_or_init(|| match build_proc_param_index(&self.pdb_path) {
+                Ok(index) => index,
+                Err(error) => {
+                    eprintln!("[ArkPdbReader] failed to build proc param index: {error:#}");
+                    ProcParamIndex::default()
+                }
+            })
     }
 
     /// Store an error for retrieval via `ark_pdb_last_error`.
