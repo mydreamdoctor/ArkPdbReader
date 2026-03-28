@@ -58,7 +58,17 @@ struct CandidateMatch<'a> {
     param_names: Vec<String>,
     score: usize,
     type_matches: usize,
+    exact_type_matches: usize,
     exact_count: bool,
+}
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
+enum TypeMatchQuality {
+    None,
+    Unknown,
+    Relaxed,
+    Normalized,
+    Exact,
 }
 
 pub fn build_proc_param_index(path: &str) -> anyhow::Result<ProcParamIndex> {
@@ -161,12 +171,15 @@ fn choose_best_candidate<'a>(
         .filter_map(|decorated_name| {
             let info = index.get(decorated_name)?;
             score_candidate(expected_params, info).map(
-                |(score, type_matches, exact_count, param_names)| CandidateMatch {
-                    decorated_name,
-                    param_names,
-                    score,
-                    type_matches,
-                    exact_count,
+                |(score, type_matches, exact_type_matches, exact_count, param_names)| {
+                    CandidateMatch {
+                        decorated_name,
+                        param_names,
+                        score,
+                        type_matches,
+                        exact_type_matches,
+                        exact_count,
+                    }
                 },
             )
         })
@@ -181,6 +194,7 @@ fn choose_best_candidate<'a>(
             .score
             .cmp(&left.score)
             .then_with(|| right.type_matches.cmp(&left.type_matches))
+            .then_with(|| right.exact_type_matches.cmp(&left.exact_type_matches))
             .then_with(|| right.exact_count.cmp(&left.exact_count))
             .then_with(|| left.decorated_name.cmp(right.decorated_name))
     });
@@ -191,7 +205,10 @@ fn choose_best_candidate<'a>(
 
     let best = &matches[0];
     let second = &matches[1];
-    if best.score > second.score || (best.exact_count && best.type_matches == expected_params.len())
+    if best.score > second.score
+        || best.type_matches > second.type_matches
+        || best.exact_type_matches > second.exact_type_matches
+        || (best.exact_count && best.type_matches == expected_params.len())
     {
         return matches.into_iter().next();
     }
@@ -202,11 +219,11 @@ fn choose_best_candidate<'a>(
 fn score_candidate(
     expected_params: &[ParamInfo],
     info: &ProcParamInfo,
-) -> Option<(usize, usize, bool, Vec<String>)> {
+) -> Option<(usize, usize, usize, bool, Vec<String>)> {
     if expected_params.is_empty() {
         let exact_count = info.param_names.is_empty();
         let score = if exact_count { 16 } else { 1 };
-        return Some((score, 0, exact_count, Vec::new()));
+        return Some((score, 0, 0, exact_count, Vec::new()));
     }
 
     if info.param_names.len() < expected_params.len()
@@ -216,24 +233,42 @@ fn score_candidate(
     }
 
     let exact_count = info.param_names.len() == expected_params.len();
-    let mut best: Option<(usize, usize, Vec<String>)> = None;
+    let mut best: Option<(usize, usize, usize, Vec<String>)> = None;
 
     for start in 0..=info.param_names.len() - expected_params.len() {
         let candidate_names = &info.param_names[start..start + expected_params.len()];
         let candidate_types = &info.param_type_names[start..start + expected_params.len()];
 
         let mut type_matches = 0usize;
+        let mut exact_type_matches = 0usize;
         let mut weak_matches = 0usize;
+        let mut relaxed_matches = 0usize;
 
         for (expected, candidate_type) in expected_params.iter().zip(candidate_types.iter()) {
-            if candidate_type == &expected.type_name {
-                type_matches += 1;
-            } else if candidate_type == "unknown" || expected.type_name == "unknown" {
-                weak_matches += 1;
+            match compare_type_names(&expected.type_name, candidate_type) {
+                TypeMatchQuality::Exact => {
+                    type_matches += 1;
+                    exact_type_matches += 1;
+                }
+                TypeMatchQuality::Normalized => {
+                    type_matches += 1;
+                }
+                TypeMatchQuality::Relaxed => {
+                    type_matches += 1;
+                    relaxed_matches += 1;
+                }
+                TypeMatchQuality::Unknown => {
+                    weak_matches += 1;
+                }
+                TypeMatchQuality::None => {}
             }
         }
 
-        let mut score = type_matches * 10 + weak_matches * 2;
+        let normalized_matches = type_matches - exact_type_matches - relaxed_matches;
+        let mut score = exact_type_matches * 12
+            + normalized_matches * 9
+            + relaxed_matches * 6
+            + weak_matches * 2;
         if exact_count {
             score += 5;
         }
@@ -241,15 +276,102 @@ fn score_candidate(
             score += 1;
         }
 
-        let candidate = (score, type_matches, candidate_names.to_vec());
+        let candidate = (
+            score,
+            type_matches,
+            exact_type_matches,
+            candidate_names.to_vec(),
+        );
         if best.as_ref().map_or(true, |current| {
-            candidate.0 > current.0 || (candidate.0 == current.0 && candidate.1 > current.1)
+            candidate.0 > current.0
+                || (candidate.0 == current.0
+                    && (candidate.1 > current.1
+                        || (candidate.1 == current.1 && candidate.2 > current.2)))
         }) {
             best = Some(candidate);
         }
     }
 
-    best.map(|(score, type_matches, param_names)| (score, type_matches, exact_count, param_names))
+    best.map(|(score, type_matches, exact_type_matches, param_names)| {
+        (
+            score,
+            type_matches,
+            exact_type_matches,
+            exact_count,
+            param_names,
+        )
+    })
+}
+
+fn compare_type_names(expected: &str, candidate: &str) -> TypeMatchQuality {
+    if expected == candidate {
+        return TypeMatchQuality::Exact;
+    }
+
+    if expected == "unknown" || candidate == "unknown" {
+        return TypeMatchQuality::Unknown;
+    }
+
+    let normalized_expected = normalize_type_name_for_match(expected);
+    let normalized_candidate = normalize_type_name_for_match(candidate);
+    if normalized_expected == normalized_candidate {
+        return TypeMatchQuality::Normalized;
+    }
+
+    if strip_cv_qualifiers(&normalized_expected) == strip_cv_qualifiers(&normalized_candidate) {
+        return TypeMatchQuality::Relaxed;
+    }
+
+    TypeMatchQuality::None
+}
+
+fn normalize_type_name_for_match(value: &str) -> String {
+    let lowered = value
+        .replace("class ", "")
+        .replace("struct ", "")
+        .replace("enum ", "")
+        .to_ascii_lowercase();
+
+    let mut compact = String::with_capacity(lowered.len());
+    let mut last_was_space = false;
+    for ch in lowered.chars() {
+        if ch.is_whitespace() {
+            if !compact.is_empty() && !last_was_space {
+                compact.push(' ');
+                last_was_space = true;
+            }
+            continue;
+        }
+
+        compact.push(ch);
+        last_was_space = false;
+    }
+
+    let compact = compact.trim().to_owned();
+    let mut without_spacing = String::with_capacity(compact.len());
+    let mut chars = compact.chars().peekable();
+    while let Some(ch) = chars.next() {
+        if ch == ' ' {
+            let prev = without_spacing.chars().last();
+            let next = chars.peek().copied();
+            if matches!(prev, Some('&' | '*' | ',' | '<' | '>' | '(' | ')'))
+                || matches!(next, Some('&' | '*' | ',' | '<' | '>' | '(' | ')'))
+            {
+                continue;
+            }
+        }
+        without_spacing.push(ch);
+    }
+
+    without_spacing
+}
+
+fn strip_cv_qualifiers(value: &str) -> String {
+    value
+        .split_whitespace()
+        .filter(|token| *token != "const" && *token != "volatile")
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 fn collect_proc_params(type_stream: &TypeStream<Vec<u8>>, iter: &mut SymIter<'_>) -> ProcParamInfo {
@@ -447,5 +569,62 @@ mod tests {
             matched,
             vec!["Options", "Address", "UniqueId", "ErrorMessage"]
         );
+    }
+
+    #[test]
+    fn normalized_type_spelling_still_matches() {
+        let mut index = ProcParamIndex::default();
+        index.insert(
+            "?DisplayDebug@AActor@@QEAAXPEBVUCanvas@@AEBVFDebugDisplayInfo@@AEAM1@Z".to_owned(),
+            ProcParamInfo {
+                param_names: vec![
+                    "Canvas".to_owned(),
+                    "Display".to_owned(),
+                    "YL".to_owned(),
+                    "YPos".to_owned(),
+                ],
+                param_type_names: vec![
+                    "class UCanvas const*".to_owned(),
+                    "struct FDebugDisplayInfo const&".to_owned(),
+                    "float&".to_owned(),
+                    "float &".to_owned(),
+                ],
+            },
+        );
+
+        let matched = choose_best_public_match(
+            &[
+                param("UCanvas const*"),
+                param("FDebugDisplayInfo const&"),
+                param("float&"),
+                param("float&"),
+            ],
+            &["?DisplayDebug@AActor@@QEAAXPEBVUCanvas@@AEBVFDebugDisplayInfo@@AEAM1@Z".to_owned()],
+            &index,
+        )
+        .expect("expected normalized type match");
+
+        assert_eq!(matched.1, vec!["Canvas", "Display", "YL", "YPos"]);
+    }
+
+    #[test]
+    fn const_placement_difference_is_a_relaxed_match() {
+        let mut index = ProcParamIndex::default();
+        index.insert(
+            "?SetLabel@AActor@@QEAAXAEBVFString@@@Z".to_owned(),
+            ProcParamInfo {
+                param_names: vec!["Label".to_owned()],
+                param_type_names: vec!["FString const&".to_owned()],
+            },
+        );
+
+        let matched = choose_best_public_match(
+            &[param("const FString&")],
+            &["?SetLabel@AActor@@QEAAXAEBVFString@@@Z".to_owned()],
+            &index,
+        )
+        .expect("expected relaxed const-insensitive match");
+
+        assert_eq!(matched.1, vec!["Label"]);
     }
 }

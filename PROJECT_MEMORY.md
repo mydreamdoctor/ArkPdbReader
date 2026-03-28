@@ -73,3 +73,14 @@ Main downstream contract:
 - Overload selection in `src/field_list.rs` now prefers the decorated candidate whose recovered parameter signature best matches the TPI parameter list instead of always taking the first public-symbol match.
 - Public-symbol decorated names are still the only names used for `decorated_name`; the module-symbol scan is used to improve parameter names, not to change the fast symbol RVA path.
 - Added unit tests covering overload disambiguation and hidden leading parameter alignment, and updated the docs to state clearly that startup offset lookup still avoids the module-symbol scan.
+
+## Recent session note (2026-03-28, normalized overload matching)
+
+- `src/proc_params.rs` now normalizes parameter type spellings before it ranks module-symbol candidates for a function.
+- The overload scorer now treats these as strong or relaxed matches instead of outright mismatches:
+  - `class UCanvas const*` vs `UCanvas const*`
+  - `float &` vs `float&`
+  - `FString const&` vs `const FString&`
+- The public decorated-name path still stays lazy and cached behind `ark_pdb_find_class_functions`.
+- `ark_pdb_open` and `ark_pdb_find_symbol_rva` were intentionally left unchanged, so the fast startup offset lookup path still does not pay for this work.
+- Added unit tests for normalized type spelling and relaxed `const` placement matching in `src/proc_params.rs`.

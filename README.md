@@ -33,8 +33,12 @@ list — no repeated scans on the startup RVA path.
 
 Parameter names use a second, lazy path. The first class-function query can
 reopen the PDB once to scan module symbol streams for `S_LOCAL` parameter
-records, then that result is cached for the rest of the session. `ark_pdb_open`
-and symbol RVA lookup still avoid that work.
+records, then that result is cached for the rest of the session. Overload
+selection on that path now compares normalized parameter signatures too, so
+spelling differences such as `class UCanvas const*` vs `UCanvas const*` and
+`FString const&` vs `const FString&` can still recover the right names without
+touching startup RVA lookup. `ark_pdb_open` and symbol RVA lookup still avoid
+that work.
 
 ---
 
@@ -172,6 +176,8 @@ walkthrough of adding ArkPdbReader to a C++ CMake project.
 - All member functions: short name, decorated name, return type, parameters
   (name + type), `isVirtual`, `isStatic`, `isConst` flags
 - Best-effort per-parameter names from module symbols when the PDB exposes them
+  and the recovered module-symbol signature can be matched back to the TPI
+  function signature
 
 **Not extracted (current version):**
 - Static data members (no instance offset)
@@ -179,3 +185,6 @@ walkthrough of adding ArkPdbReader to a C++ CMake project.
 - Full template argument expansion (template names are included verbatim)
 - Guaranteed real parameter names for every function. When the module symbols
   do not expose names, ArkPdbReader still falls back to positional `paramN`.
+- Guaranteed real parameter names for every function. Ambiguous overloads can
+  still fall back to placeholders when the reader cannot choose one normalized
+  signature confidently.

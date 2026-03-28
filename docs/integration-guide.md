@@ -10,7 +10,9 @@ Important performance detail: `ark_pdb_open` still loads only the shared TPI,
 IPI, and public symbol data needed for fast layout, type, and RVA work. The
 reader now does a separate one-time module symbol scan only when
 `getClassFunctions` / `ark_pdb_find_class_functions` is called and parameter
-name enrichment is needed.
+name enrichment is needed. That lazy path also normalizes common type spelling
+differences before ranking overload candidates, so it can recover names from
+module symbols without pushing more work into startup RVA lookup.
 
 ---
 

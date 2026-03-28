@@ -554,6 +554,8 @@ public:
      *
      * The first call may trigger a one-time lazy module-symbol scan to recover
      * better parameter names. That cache does not affect open-time symbol RVA lookup.
+     * Overload matching on that path also normalizes common type spelling
+     * differences before it gives up on recovering real names.
      *
      * @return  ClassFunctionList RAII wrapper (check operator bool()).
      */

@@ -486,6 +486,9 @@ int32_t ark_pdb_funclist_get_param_count(
  * Write the name of parameter param_index of function func_index into buf.
  * ArkPdbReader first tries to recover names from module symbols. If the PDB
  * does not expose a better name, positional "paramN" is used as a fallback.
+ * Overload matching on that lazy path normalizes common type spelling
+ * differences such as class/struct prefixes, pointer/reference whitespace,
+ * and relaxed `const` placement before it gives up.
  */
 void ark_pdb_funclist_get_param_name(
     const ArkFunctionListHandle* handle,

@@ -162,8 +162,12 @@ used**.
 
 When multiple overloads exist (same class + method name), all decorated names
 are stored. ArkPdbReader now prefers the candidate whose recovered module-symbol
-signature best matches the TPI parameter list. If no stronger match exists, it
-still falls back to the first public-symbol candidate.
+signature best matches the TPI parameter list. That comparison now normalizes
+common spelling differences such as `class` / `struct` prefixes, whitespace
+around pointer or reference tokens, and relaxed `const` placement like
+`FString const&` vs `const FString&`. If no unique stronger match exists, it
+still falls back to owner-name matching or the first public-symbol candidate's
+decorated name.
 
 ### Symbol index build cost
 
@@ -253,9 +257,10 @@ is needed.
 
 ## 9. Known limitations
 
-1. **Decorated name overloads**: overloads are matched by best-effort type and
-   arity alignment, but some ambiguous cases can still fall back to the first
-   public-symbol candidate.
+1. **Decorated name overloads**: overloads are matched by best-effort
+   normalized type and arity alignment, including relaxed `const` placement,
+   but some ambiguous cases can still fall back to owner-name matching or the
+   first public-symbol candidate.
 2. **Template members**: template instantiation members are present but type
    names for template arguments may be verbose.
 3. **Anonymous structs/unions**: unnamed members (e.g. anonymous union fields)
